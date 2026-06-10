@@ -57,6 +57,7 @@ int main(int argc, char *argv[])
     qputenv("QT_QPA_EGLFS_HIDECURSOR", QByteArrayLiteral("1"));
     installOpenHbbTVDebugLogger();
     qDebug() << "[OpenHbbTV] process start argc" << argc;
+    qDebug() << "[OpenHbbTV] build mode e2-rcu-owner-syncfix";
 #if defined(EMBEDDED_BUILD)
     HardwareProfile::applyEnvironment(argc, argv);
 
@@ -196,6 +197,7 @@ int main(int argc, char *argv[])
     QList<RemoteController *> remotes;
     if (e2OwnsRcu) {
         qDebug() << "[OpenHbbTV] direct evdev input disabled; E2 owns RCU";
+        qDebug() << "[OpenHbbTV] no browser evdev reader will be opened in E2 RCU owner mode";
     } else {
         const QStringList remoteDevices = HardwareProfile::remoteDevices(argc, argv);
         const bool filterNavigationKeys = HardwareProfile::filterRemoteNavigationKeys(argc, argv);

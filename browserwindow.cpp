@@ -24,6 +24,7 @@ BrowserWindow::BrowserWindow(QWidget *parent, Qt::WindowFlags flags)
     connect(m_webView, &WebView::hbbtvCommand, this, &BrowserWindow::sendHbbtvCommand);
     connect(m_commandClient, &CommandClient::commandReceived, this, &BrowserWindow::onBackendCommand);
     qDebug() << "[OpenHbbTV] BrowserWindow created";
+    qDebug() << "[OpenHbbTV] backend command support OPEN_URL SET_CHANNEL BROADCAST_INFO SHOW_APPLICATION HIDE_APPLICATION INJECT_KEY SET_STREAM_STATE QUIT";
 }
 
 void BrowserWindow::showEvent(QShowEvent *event)
@@ -76,14 +77,23 @@ void BrowserWindow::onBackendCommand(int command, const QString &data)
         m_webView->setBroadcastInfo(data);
         break;
     case CommandClient::CommandShowApplication:
+        qDebug() << "[OpenHbbTV] backend SHOW_APPLICATION" << data;
         m_webView->showApplicationOverlay(data);
         break;
     case CommandClient::CommandHideApplication:
+        qDebug() << "[OpenHbbTV] backend HIDE_APPLICATION" << data;
         m_webView->hideApplicationOverlay(data);
         break;
-    case CommandClient::CommandInjectKey:
-        m_webView->sendKeyEvent(data.toInt());
+    case CommandClient::CommandInjectKey: {
+        bool ok = false;
+        const int keyCode = data.toInt(&ok);
+        qDebug() << "[OpenHbbTV] backend INJECT_KEY" << data << "parsed" << ok << keyCode;
+        if (ok)
+            m_webView->sendKeyEvent(keyCode);
+        else
+            qWarning() << "[OpenHbbTV] invalid INJECT_KEY payload" << data;
         break;
+    }
     case CommandClient::CommandSetStreamState: {
         QStringList parts = data.split(QLatin1Char(','));
         int state = parts.value(0).toInt();
