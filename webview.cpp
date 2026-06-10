@@ -184,9 +184,38 @@ void WebView::setScriptDebugging(const QString &scriptDebugging)
     page()->scripts().insert(script);
 }
 
+void WebView::setInitialUrl(const QUrl &url)
+{
+    m_initialUrl = url;
+    qDebug() << "[OpenHbbTV] initial url stored" << m_initialUrl.toString();
+}
+
+bool WebView::isTeletextUrl() const
+{
+    const QUrl currentUrl = url();
+    const QString host = currentUrl.host().toLower();
+    const QString path = currentUrl.path().toLower();
+    const QString full = currentUrl.toString().toLower();
+
+    return host.startsWith(QStringLiteral("vtx.")) ||
+           host.contains(QStringLiteral("videotext")) ||
+           path.contains(QStringLiteral("videotext")) ||
+           full.contains(QStringLiteral("vtx."));
+}
+
 void WebView::sendKeyEvent(const int &keyCode)
 {
     qDebug() << "[OpenHbbTV] sendKeyEvent" << keyCode;
+
+    if (keyCode == VirtualKey::VK_0 && isTeletextUrl()) {
+        if (m_initialUrl.isValid() && !m_initialUrl.isEmpty()) {
+            qDebug() << "[OpenHbbTV] teletext key 0 return to initial url" << m_initialUrl.toString();
+            setUrl(m_initialUrl);
+            return;
+        }
+        qDebug() << "[OpenHbbTV] teletext key 0 detected but initial url is empty";
+    }
+
     if (keyCode == VirtualKey::VK_BACK) {
         if (!page()->history()->canGoBack()) {
             if (!m_quitMsgStatus) {

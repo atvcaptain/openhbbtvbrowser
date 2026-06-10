@@ -154,6 +154,7 @@ int main(int argc, char *argv[])
     window->webView()->setLanguage(QStringLiteral("DEU")); // TODO:
     window->webView()->setScriptDebugging(scriptDebugging ? QStringLiteral("true") : QStringLiteral("false"));
     qDebug() << "[OpenHbbTV] set initial url" << url.toString();
+    window->webView()->setInitialUrl(url);
     window->webView()->setUrl(url);
 #if defined(EMBEDDED_BUILD)
     qDebug() << "[OpenHbbTV] showFullScreen" << window->geometry();

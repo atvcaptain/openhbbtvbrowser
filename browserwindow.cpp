@@ -58,9 +58,10 @@ void BrowserWindow::onBackendCommand(int command, const QString &data)
     qDebug() << "[OpenHbbTV] e2->browser command" << command << data;
     switch (command) {
     case CommandClient::CommandOpenUrl:
-        if (!data.isEmpty())
+        if (!data.isEmpty()) {
             qDebug() << "[OpenHbbTV] open url from backend" << data;
             m_webView->setUrl(QUrl::fromUserInput(data));
+        }
         break;
     case CommandClient::CommandSetCurrentChannel: {
         QStringList parts = data.split(QLatin1Char(','));

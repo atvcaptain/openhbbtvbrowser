@@ -4,6 +4,7 @@
 #include <QWebEngineView>
 #include <QLabel>
 #include <QWebEngineUrlRequestInterceptor>
+#include <QUrl>
 
 class RequestLogger : public QWebEngineUrlRequestInterceptor {
 public:
@@ -25,6 +26,7 @@ public:
     void setCurrentChannel(const int &onid, const int &tsid, const int &sid);
     void setBroadcastInfo(const QString &json);
     void setStreamState(int state, int error);
+    void setInitialUrl(const QUrl &url);
     void setLanguage(const QString &language);
     void setScriptDebugging(const QString &scriptDebugging);
 
@@ -40,6 +42,8 @@ protected Q_SLOTS:
 
 private:
     void dispatchHbbtvBridgeCommand(const QString &command);
+    bool isTeletextUrl() const;
+    QUrl m_initialUrl;
     QLabel *m_quitMsg;
     int m_quitMsgStatus;
 };
