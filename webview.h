@@ -27,6 +27,7 @@ public:
     void setCurrentChannel(const int &onid, const int &tsid, const int &sid);
     void setBroadcastInfo(const QString &json);
     void setStreamState(int state, int error);
+    bool isStreamActive() const;
     void setInitialUrl(const QUrl &url);
     void setLanguage(const QString &language);
     void setScriptDebugging(const QString &scriptDebugging);
@@ -54,8 +55,10 @@ private:
     void refreshApplicationAfterTeletextReturn();
     bool isInitialUrl(const QUrl &candidate) const;
     void injectKeyEvent(int keyCode);
+    bool handleStreamKeyFallback(int keyCode);
     QUrl m_initialUrl;
     QString m_lastBroadcastInfo;
+    int m_streamState;
     bool m_teletextReturnInProgress;
     QString m_teletextDigitBuffer;
     QTimer *m_teletextDigitTimer;

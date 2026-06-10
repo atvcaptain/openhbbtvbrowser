@@ -13,7 +13,12 @@
 #include <QTimer>
 
 WebView::WebView(QWidget *parent)
-    : QWebEngineView(parent), m_teletextReturnInProgress(false), m_quitMsg(new QLabel), m_teletextDigitTimer(new QTimer(this)), m_quitMsgStatus(0)
+    : QWebEngineView(parent)
+    , m_streamState(0)
+    , m_teletextReturnInProgress(false)
+    , m_quitMsg(new QLabel)
+    , m_teletextDigitTimer(new QTimer(this))
+    , m_quitMsgStatus(0)
 {
     QScreen *screen = QGuiApplication::primaryScreen();
     QRect screenGeometry = screen->geometry();
@@ -179,6 +184,7 @@ void WebView::refreshApplicationAfterTeletextReturn()
 
 void WebView::setStreamState(int state, int error)
 {
+    m_streamState = state;
     qDebug() << "[OpenHbbTV] setStreamState" << state << error;
     QString s = QString::fromLatin1("(function() {"
                                     "  window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};"
@@ -189,6 +195,33 @@ void WebView::setStreamState(int state, int error)
                                     "  }"
                                     "})();").arg(state).arg(error);
     page()->runJavaScript(s);
+}
+
+bool WebView::isStreamActive() const
+{
+    return m_streamState == 1 || m_streamState == 2;
+}
+
+bool WebView::handleStreamKeyFallback(int keyCode)
+{
+    if (!isStreamActive())
+        return false;
+
+    switch (keyCode) {
+    case VirtualKey::VK_STOP:
+    case VirtualKey::VK_BACK:
+        qDebug() << "[OpenHbbTV] direct stream stop fallback for key" << keyCode;
+        emit hbbtvCommand(CommandClient::CommandStopStream, QString());
+        return true;
+    case VirtualKey::VK_PAUSE:
+        qDebug() << "[OpenHbbTV] direct stream pause fallback for key" << keyCode;
+        emit hbbtvCommand(CommandClient::CommandPauseStream, QString());
+        return true;
+    default:
+        break;
+    }
+
+    return false;
 }
 
 void WebView::setLanguage(const QString &language)
@@ -275,37 +308,25 @@ void WebView::loadInitialUrlAfterTeletextReturn(int delayMs)
 
 void WebView::beginTeletextReturn()
 {
-    if (!m_initialUrl.isValid() || m_initialUrl.isEmpty()) {
-        qDebug() << "[OpenHbbTV] teletext leading zero detected but initial url is empty";
-        return;
-    }
-
     if (m_teletextReturnInProgress) {
         qDebug() << "[OpenHbbTV] ignore repeated teletext leading zero during return";
         return;
     }
 
-    qDebug() << "[OpenHbbTV] teletext leading zero start guarded return via E2 start application" << m_initialUrl.toString();
+    qDebug() << "[OpenHbbTV] teletext leading zero request fresh red-button restart" << m_initialUrl.toString();
     m_teletextReturnInProgress = true;
     m_teletextDigitBuffer.clear();
     m_teletextDigitTimer->stop();
 
-    // Do not forward the leading zero to the teletext page. Stop the current
-    // vtx page first, then let Enigma2/eHbbtv reopen the broadcaster start
-    // application. This preserves AIT/app parameters better than a pure local
-    // setUrl(m_initialUrl) reload.
-    stop();
-    setUrl(QUrl(QStringLiteral("about:blank")));
-    emit hbbtvCommand(CommandClient::CommandCreateApplication, QStringLiteral("dvb://current.ait/13.1?autoshow=1"));
+    // Do not forward the leading zero to the teletext application. A local URL
+    // reload leaves stale ARD/VTX JavaScript state behind, so ask the Enigma2
+    // backend to stop the current browser process and start a fresh Red Button
+    // application instance through the normal eHbbTV activation path.
+    emit hbbtvCommand(CommandClient::CommandRestartApplication, QStringLiteral("redbutton"));
 
-    // Fallback only. If E2 answers with OPEN_URL, BrowserWindow will load it
-    // before this fires. Keeping the fallback avoids a permanent blank page if
-    // the backend cannot resolve the locator.
-    loadInitialUrlAfterTeletextReturn(900);
-
-    QTimer::singleShot(4500, this, [this]() {
+    QTimer::singleShot(2500, this, [this]() {
         if (m_teletextReturnInProgress) {
-            qDebug() << "[OpenHbbTV] teletext leading-zero return guard timeout" << url().toString();
+            qDebug() << "[OpenHbbTV] teletext fresh restart still pending" << url().toString();
             m_teletextReturnInProgress = false;
         }
     });
@@ -392,6 +413,9 @@ void WebView::sendKeyEvent(const int &keyCode)
     if (!m_teletextDigitBuffer.isEmpty())
         flushTeletextDigitBuffer();
 
+    if (handleStreamKeyFallback(keyCode))
+        return;
+
     if (keyCode == VirtualKey::VK_BACK) {
         if (!page()->history()->canGoBack()) {
             if (!m_quitMsgStatus) {
@@ -430,6 +454,8 @@ void WebView::injectKeyEvent(int keyCode)
                                     "    if (value === 39 || value === 405) return 'ArrowRight';"
                                     "    if (value === 40 || value === 406) return 'ArrowDown';"
                                     "    if (value === 461) return 'Backspace';"
+                                    "    if (value === 413) return 'Stop';"
+                                    "    if (value === 415) return 'Play';"
                                     "    return vkName || String(value);"
                                     "  }"
                                     "  function makeEvent(type) {"
