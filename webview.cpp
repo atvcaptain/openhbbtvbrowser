@@ -224,7 +224,6 @@ void WebView::sendKeyEvent(const int &keyCode)
                                     "    return e;"
                                     "  }"
                                     "  target.dispatchEvent(makeEvent('keydown'));"
-                                    "  target.dispatchEvent(makeEvent('keyup'));"
                                     "  if (%1 == 13) {"
                                     "    var mouseEvent = new MouseEvent('click', {"
                                     "      bubbles : true,"

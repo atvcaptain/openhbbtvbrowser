@@ -30527,7 +30527,6 @@ const hbbtvFn = function () {
     };
 
     Application.prototype.createApplication = function (uri, createChild) {
-        window.signalopenhbbtvbrowser && window.signalopenhbbtvbrowser('LOG:Application.createApplication:' + uri);
         window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: createApplication: ' + uri);
 
         var newLocation = uri;
@@ -30697,10 +30696,25 @@ function init() {
     window.HBBTV_POLYFILL_DEBUG && console.log("hbbtv-polyfill: load");
 
     window.__openatvHbbtvCommandSeq = 0;
-    window.signalopenhbbtvbrowser = function(command) {
+    window.__openatvHbbtvCommandQueue = [];
+    window.__openatvHbbtvCommandActive = false;
+    window.__openatvHbbtvFlushCommandQueue = function() {
+        if (!window.__openatvHbbtvCommandQueue.length) {
+            window.__openatvHbbtvCommandActive = false;
+            return;
+        }
+        window.__openatvHbbtvCommandActive = true;
+        var command = window.__openatvHbbtvCommandQueue.shift();
         window.__openatvHbbtvCommandSeq += 1;
         document.title = "OPENATV_HBBTV:" + command + "||" + window.__openatvHbbtvCommandSeq;
-    }
+        window.setTimeout(window.__openatvHbbtvFlushCommandQueue, 25);
+    };
+    window.signalopenhbbtvbrowser = function(command) {
+        window.__openatvHbbtvCommandQueue.push(command);
+        if (!window.__openatvHbbtvCommandActive) {
+            window.setTimeout(window.__openatvHbbtvFlushCommandQueue, 0);
+        }
+    };
 
     // intercept XMLHttpRequest
     let cefOldXHROpen = window.XMLHttpRequest.prototype.open;

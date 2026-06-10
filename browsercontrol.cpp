@@ -67,7 +67,7 @@ void RemoteController::readKeycode()
     n /= sizeof(buffer[0]);
 
     for (int i = 0; i < n; ++i) {
-        if (buffer[i].type == 1 && buffer[i].value != 0) {
+        if (buffer[i].type == 1 && buffer[i].value == 1) {
             int vk = VirtualKey::VK_UNDEFINED;
             switch (buffer[i].code) {
             case KEY_RED:           vk = VirtualKey::VK_RED; break;
@@ -105,7 +105,7 @@ void RemoteController::readKeycode()
             case KEY_POWER:         vk = VirtualKey::VK_POWER; break;
             }
             if (vk != VirtualKey::VK_UNDEFINED) {
-                qDebug() << "[OpenHbbTV] evdev key" << buffer[i].code << "-> virtual" << vk;
+                qDebug() << "[OpenHbbTV] evdev key" << buffer[i].code << "value" << buffer[i].value << "-> virtual" << vk;
                 emit activate(vk);
             }
         }
