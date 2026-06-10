@@ -127,6 +127,7 @@ void WebView::setCurrentChannel(const int &onid, const int &tsid, const int &sid
 void WebView::setBroadcastInfo(const QString &json)
 {
     qDebug() << "[OpenHbbTV] setBroadcastInfo" << json.left(240);
+    m_lastBroadcastInfo = json;
     const QByteArray encoded = json.toUtf8().toBase64();
     QString s = QString::fromLatin1(
         "(function() {"
@@ -148,6 +149,32 @@ void WebView::setBroadcastInfo(const QString &json)
         "  }"
         "})();").arg(QString::fromLatin1(encoded));
     page()->runJavaScript(s);
+}
+
+void WebView::refreshApplicationAfterTeletextReturn()
+{
+    qDebug() << "[OpenHbbTV] refresh application after teletext return";
+    page()->runJavaScript(QString::fromLatin1(
+        "(function() {"
+        "  try { document.body.style.visibility = 'visible'; } catch (e) {}"
+        "  try {"
+        "    if (window.oipfApplicationManager && window.oipfApplicationManager.getOwnerApplication) {"
+        "      var app = window.oipfApplicationManager.getOwnerApplication(document);"
+        "      if (app && app.show) app.show();"
+        "    }"
+        "  } catch (e) {}"
+        "  try {"
+        "    if (window.HBBTV_POLYFILL_NS && window.HBBTV_POLYFILL_NS.broadcastInfo &&"
+        "        typeof window.HBBTV_POLYFILL_NS.applyBroadcastInfo === 'function') {"
+        "      window.HBBTV_POLYFILL_NS.applyBroadcastInfo(window.HBBTV_POLYFILL_NS.broadcastInfo);"
+        "    }"
+        "  } catch (e) {}"
+        "  try { window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('focus')); } catch (e) {}"
+        "})();"));
+    if (!m_lastBroadcastInfo.isEmpty())
+        QTimer::singleShot(150, this, [this]() { setBroadcastInfo(m_lastBroadcastInfo); });
+    if (!m_lastBroadcastInfo.isEmpty())
+        QTimer::singleShot(650, this, [this]() { setBroadcastInfo(m_lastBroadcastInfo); });
 }
 
 void WebView::setStreamState(int state, int error)
@@ -225,8 +252,8 @@ bool WebView::isInitialUrl(const QUrl &candidate) const
     if (!m_initialUrl.isValid() || m_initialUrl.isEmpty())
         return false;
 
-    const QUrl normalizedCandidate = candidate.adjusted(QUrl::RemoveFragment);
-    const QUrl normalizedInitial = m_initialUrl.adjusted(QUrl::RemoveFragment);
+    const QUrl normalizedCandidate = candidate.adjusted(QUrl::RemoveFragment | QUrl::RemoveQuery);
+    const QUrl normalizedInitial = m_initialUrl.adjusted(QUrl::RemoveFragment | QUrl::RemoveQuery);
     return normalizedCandidate == normalizedInitial;
 }
 
@@ -258,15 +285,25 @@ void WebView::beginTeletextReturn()
         return;
     }
 
-    qDebug() << "[OpenHbbTV] teletext leading zero start guarded return to initial url" << m_initialUrl.toString();
+    qDebug() << "[OpenHbbTV] teletext leading zero start guarded return via E2 start application" << m_initialUrl.toString();
     m_teletextReturnInProgress = true;
     m_teletextDigitBuffer.clear();
     m_teletextDigitTimer->stop();
+
+    // Do not forward the leading zero to the teletext page. Stop the current
+    // vtx page first, then let Enigma2/eHbbtv reopen the broadcaster start
+    // application. This preserves AIT/app parameters better than a pure local
+    // setUrl(m_initialUrl) reload.
     stop();
     setUrl(QUrl(QStringLiteral("about:blank")));
-    loadInitialUrlAfterTeletextReturn(120);
+    emit hbbtvCommand(CommandClient::CommandCreateApplication, QStringLiteral("dvb://current.ait/13.1?autoshow=1"));
 
-    QTimer::singleShot(3500, this, [this]() {
+    // Fallback only. If E2 answers with OPEN_URL, BrowserWindow will load it
+    // before this fires. Keeping the fallback avoids a permanent blank page if
+    // the backend cannot resolve the locator.
+    loadInitialUrlAfterTeletextReturn(900);
+
+    QTimer::singleShot(4500, this, [this]() {
         if (m_teletextReturnInProgress) {
             qDebug() << "[OpenHbbTV] teletext leading-zero return guard timeout" << url().toString();
             m_teletextReturnInProgress = false;
@@ -474,6 +511,8 @@ void WebView::loadFinished(bool ok)
     if (m_teletextReturnInProgress && ok && isInitialUrl(url())) {
         qDebug() << "[OpenHbbTV] teletext leading-zero return completed" << url().toString();
         m_teletextReturnInProgress = false;
+        QTimer::singleShot(80, this, &WebView::refreshApplicationAfterTeletextReturn);
+        QTimer::singleShot(450, this, &WebView::refreshApplicationAfterTeletextReturn);
     }
     if (ok) {
         if (size().width() == 1920 && size().height() == 1080)

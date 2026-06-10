@@ -51,9 +51,11 @@ private:
     void flushTeletextDigitBuffer();
     void beginTeletextReturn();
     void loadInitialUrlAfterTeletextReturn(int delayMs);
+    void refreshApplicationAfterTeletextReturn();
     bool isInitialUrl(const QUrl &candidate) const;
     void injectKeyEvent(int keyCode);
     QUrl m_initialUrl;
+    QString m_lastBroadcastInfo;
     bool m_teletextReturnInProgress;
     QString m_teletextDigitBuffer;
     QTimer *m_teletextDigitTimer;
