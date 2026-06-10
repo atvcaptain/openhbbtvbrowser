@@ -27,6 +27,7 @@ public:
     void setCurrentChannel(const int &onid, const int &tsid, const int &sid);
     void setBroadcastInfo(const QString &json);
     void setStreamState(int state, int error);
+    void showApplicationOverlay(const QString &reason = QString());
     bool isStreamActive() const;
     void setInitialUrl(const QUrl &url);
     void setLanguage(const QString &language);

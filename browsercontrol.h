@@ -43,7 +43,9 @@ struct input_event {
 #define KEY_EXIT        174
 #define KEY_PLAY        207
 #define KEY_FASTFORWARD 208
+#define KEY_ENTER       28
 #define KEY_OK          0x160
+#define KEY_SELECT      0x161
 #define KEY_INFO        0x166
 #define KEY_SUBTITLE    0x172
 #define KEY_TEXT        0x184
@@ -123,7 +125,8 @@ public:
         CommandOpenUrl = 101,
         CommandSetCurrentChannel = 102,
         CommandQuit = 103,
-        CommandSetBroadcastInfo = 104
+        CommandSetBroadcastInfo = 104,
+        CommandShowApplication = 105
     };
 
     CommandClient(const QString &sockFile = QString("/tmp/openhbbtvbrowser.socket"));

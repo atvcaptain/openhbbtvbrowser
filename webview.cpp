@@ -156,6 +156,24 @@ void WebView::setBroadcastInfo(const QString &json)
     page()->runJavaScript(s);
 }
 
+
+void WebView::showApplicationOverlay(const QString &reason)
+{
+    qDebug() << "[OpenHbbTV] show application overlay" << reason;
+    page()->runJavaScript(QString::fromLatin1(
+        "(function() {"
+        "  try { if (document.documentElement) document.documentElement.style.visibility = 'visible'; } catch (e) {}"
+        "  try { if (document.body) { document.body.style.visibility = 'visible'; document.body.style.display = ''; document.body.style.opacity = '1'; if (document.body.focus) document.body.focus(); } } catch (e) {}"
+        "  try {"
+        "    if (window.oipfApplicationManager && window.oipfApplicationManager.getOwnerApplication) {"
+        "      var app = window.oipfApplicationManager.getOwnerApplication(document);"
+        "      if (app && app.show) app.show();"
+        "    }"
+        "  } catch (e) {}"
+        "  try { window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('focus')); } catch (e) {}"
+        "})();"));
+}
+
 void WebView::refreshApplicationAfterTeletextReturn()
 {
     qDebug() << "[OpenHbbTV] refresh application after teletext return";
@@ -195,6 +213,11 @@ void WebView::setStreamState(int state, int error)
                                     "  }"
                                     "})();").arg(state).arg(error);
     page()->runJavaScript(s);
+    if (state == 0) {
+        showApplicationOverlay(QStringLiteral("stream state stopped"));
+        QTimer::singleShot(150, this, [this]() { showApplicationOverlay(QStringLiteral("stream state stopped retry 1")); });
+        QTimer::singleShot(650, this, [this]() { showApplicationOverlay(QStringLiteral("stream state stopped retry 2")); });
+    }
 }
 
 bool WebView::isStreamActive() const
@@ -208,10 +231,16 @@ bool WebView::handleStreamKeyFallback(int keyCode)
         return false;
 
     switch (keyCode) {
+    case VirtualKey::VK_ENTER:
+        qDebug() << "[OpenHbbTV] stream enter key: show application overlay";
+        showApplicationOverlay(QStringLiteral("stream enter"));
+        return false;
     case VirtualKey::VK_STOP:
     case VirtualKey::VK_BACK:
         qDebug() << "[OpenHbbTV] direct stream stop fallback for key" << keyCode;
+        m_streamState = 0;
         emit hbbtvCommand(CommandClient::CommandStopStream, QString());
+        showApplicationOverlay(QStringLiteral("direct stream stop fallback"));
         return true;
     case VirtualKey::VK_PAUSE:
         qDebug() << "[OpenHbbTV] direct stream pause fallback for key" << keyCode;
@@ -415,6 +444,9 @@ void WebView::sendKeyEvent(const int &keyCode)
 
     if (handleStreamKeyFallback(keyCode))
         return;
+
+    if (isStreamActive())
+        showApplicationOverlay(QStringLiteral("stream key"));
 
     if (keyCode == VirtualKey::VK_BACK) {
         if (!page()->history()->canGoBack()) {

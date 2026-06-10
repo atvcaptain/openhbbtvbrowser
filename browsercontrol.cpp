@@ -78,7 +78,9 @@ void RemoteController::readKeycode()
             case KEY_UP:            if (!m_filterNavigationKeys) vk = VirtualKey::VK_UP; break;
             case KEY_RIGHT:         if (!m_filterNavigationKeys) vk = VirtualKey::VK_RIGHT; break;
             case KEY_DOWN:          if (!m_filterNavigationKeys) vk = VirtualKey::VK_DOWN; break;
-            case KEY_OK:            if (!m_filterNavigationKeys) vk = VirtualKey::VK_ENTER; break;
+            case KEY_ENTER:
+            case KEY_OK:
+            case KEY_SELECT:        if (!m_filterNavigationKeys) vk = VirtualKey::VK_ENTER; break;
             case KEY_EXIT:          vk = VirtualKey::VK_BACK; break;
             case KEY_0:             vk = VirtualKey::VK_0; break;
             case KEY_1:             vk = VirtualKey::VK_1; break;
