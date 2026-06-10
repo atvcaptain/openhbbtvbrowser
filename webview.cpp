@@ -13,11 +13,13 @@
 #include <QFileInfo>
 #include <QTimer>
 #include <QWidget>
+#include <QDateTime>
 
 WebView::WebView(QWidget *parent)
     : QWebEngineView(parent)
     , m_streamState(0)
     , m_streamOverlayVisible(true)
+    , m_streamOverlayHoldUntilMs(0)
     , m_teletextReturnInProgress(false)
     , m_teletextDigitTimer(new QTimer(this))
     , m_quitMsg(new QLabel)
@@ -182,6 +184,8 @@ void WebView::setBroadcastInfo(const QString &json)
 void WebView::showApplicationOverlay(const QString &reason)
 {
     m_streamOverlayVisible = true;
+    if (isStreamActive())
+        m_streamOverlayHoldUntilMs = QDateTime::currentMSecsSinceEpoch() + 2000;
     qDebug() << "[OpenHbbTV] show application overlay" << reason;
     QWidget *top = window();
     if (top && !top->isVisible()) {
@@ -208,7 +212,13 @@ void WebView::hideApplicationOverlay(const QString &reason)
 {
     if (!isStreamActive())
         return;
+    if (reason.contains(QStringLiteral("auto hide")) && m_streamOverlayVisible && QDateTime::currentMSecsSinceEpoch() < m_streamOverlayHoldUntilMs) {
+        qDebug() << "[OpenHbbTV] skip auto hide while stream overlay is explicitly visible" << reason;
+        return;
+    }
     m_streamOverlayVisible = false;
+    if (!reason.contains(QStringLiteral("auto hide")))
+        m_streamOverlayHoldUntilMs = 0;
     qDebug() << "[OpenHbbTV] hide application overlay" << reason;
     QWidget *top = window();
     if (top && top->isVisible()) {
