@@ -187,16 +187,26 @@ int main(int argc, char *argv[])
 #endif
 
 #if defined(EMBEDDED_BUILD)
-    const QStringList remoteDevices = HardwareProfile::remoteDevices(argc, argv);
-    const bool filterNavigationKeys = HardwareProfile::filterRemoteNavigationKeys(argc, argv);
-    qDebug() << "[OpenHbbTV] remote devices" << remoteDevices
-             << "direct-navigation-keys" << (!filterNavigationKeys);
+    const QString disableEvdev = QString::fromLocal8Bit(qgetenv("OPENHBBTV_DISABLE_EVDEV")).trimmed().toLower();
+    const bool e2OwnsRcu = disableEvdev == QStringLiteral("1") ||
+                           disableEvdev == QStringLiteral("yes") ||
+                           disableEvdev == QStringLiteral("true") ||
+                           disableEvdev == QStringLiteral("on") ||
+                           disableEvdev == QStringLiteral("enabled");
     QList<RemoteController *> remotes;
-    for (const QString &remoteDevice : remoteDevices) {
-        auto remote = new RemoteController(remoteDevice, filterNavigationKeys);
-        remote->setParent(window);
-        remotes << remote;
-        QObject::connect(remote, &RemoteController::activate, window->webView(), &WebView::sendKeyEvent);
+    if (e2OwnsRcu) {
+        qDebug() << "[OpenHbbTV] direct evdev input disabled; E2 owns RCU";
+    } else {
+        const QStringList remoteDevices = HardwareProfile::remoteDevices(argc, argv);
+        const bool filterNavigationKeys = HardwareProfile::filterRemoteNavigationKeys(argc, argv);
+        qDebug() << "[OpenHbbTV] remote devices" << remoteDevices
+                 << "direct-navigation-keys" << (!filterNavigationKeys);
+        for (const QString &remoteDevice : remoteDevices) {
+            auto remote = new RemoteController(remoteDevice, filterNavigationKeys);
+            remote->setParent(window);
+            remotes << remote;
+            QObject::connect(remote, &RemoteController::activate, window->webView(), &WebView::sendKeyEvent);
+        }
     }
 #else
     auto filter = new WindowEventFilter();

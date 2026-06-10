@@ -126,7 +126,9 @@ public:
         CommandSetCurrentChannel = 102,
         CommandQuit = 103,
         CommandSetBroadcastInfo = 104,
-        CommandShowApplication = 105
+        CommandShowApplication = 105,
+        CommandHideApplication = 106,
+        CommandInjectKey = 107
     };
 
     CommandClient(const QString &sockFile = QString("/tmp/openhbbtvbrowser.socket"));
