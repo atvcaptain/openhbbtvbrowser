@@ -57,6 +57,8 @@ private:
     void refreshApplicationAfterTeletextReturn();
     bool isInitialUrl(const QUrl &candidate) const;
     void injectKeyEvent(int keyCode);
+    bool nativeNavigationKeysEnabled() const;
+    bool isNavigationOrEnterKey(int keyCode) const;
     bool handleStreamKeyFallback(int keyCode);
     QUrl m_initialUrl;
     QString m_lastBroadcastInfo;

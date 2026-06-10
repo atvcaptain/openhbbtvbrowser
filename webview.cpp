@@ -19,8 +19,8 @@ WebView::WebView(QWidget *parent)
     , m_streamState(0)
     , m_streamOverlayVisible(true)
     , m_teletextReturnInProgress(false)
-    , m_quitMsg(new QLabel)
     , m_teletextDigitTimer(new QTimer(this))
+    , m_quitMsg(new QLabel)
     , m_quitMsgStatus(0)
 {
     QScreen *screen = QGuiApplication::primaryScreen();
