@@ -17,6 +17,7 @@
 WebView::WebView(QWidget *parent)
     : QWebEngineView(parent)
     , m_streamState(0)
+    , m_streamOverlayVisible(true)
     , m_teletextReturnInProgress(false)
     , m_quitMsg(new QLabel)
     , m_teletextDigitTimer(new QTimer(this))
@@ -180,6 +181,7 @@ void WebView::setBroadcastInfo(const QString &json)
 
 void WebView::showApplicationOverlay(const QString &reason)
 {
+    m_streamOverlayVisible = true;
     qDebug() << "[OpenHbbTV] show application overlay" << reason;
     QWidget *top = window();
     if (top && !top->isVisible()) {
@@ -206,6 +208,7 @@ void WebView::hideApplicationOverlay(const QString &reason)
 {
     if (!isStreamActive())
         return;
+    m_streamOverlayVisible = false;
     qDebug() << "[OpenHbbTV] hide application overlay" << reason;
     QWidget *top = window();
     if (top && top->isVisible()) {
@@ -275,10 +278,14 @@ bool WebView::handleStreamKeyFallback(int keyCode)
         return false;
 
     switch (keyCode) {
-    case VirtualKey::VK_ENTER:
+    case VirtualKey::VK_ENTER: {
+        const bool wasVisible = m_streamOverlayVisible;
         qDebug() << "[OpenHbbTV] stream enter key: show application overlay";
         showApplicationOverlay(QStringLiteral("stream enter"));
+        if (!wasVisible)
+            return true;
         return false;
+    }
     case VirtualKey::VK_STOP:
     case VirtualKey::VK_BACK:
         qDebug() << "[OpenHbbTV] direct stream stop fallback for key" << keyCode;

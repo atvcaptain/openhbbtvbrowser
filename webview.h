@@ -61,6 +61,7 @@ private:
     QUrl m_initialUrl;
     QString m_lastBroadcastInfo;
     int m_streamState;
+    bool m_streamOverlayVisible;
     bool m_teletextReturnInProgress;
     QString m_teletextDigitBuffer;
     QTimer *m_teletextDigitTimer;
