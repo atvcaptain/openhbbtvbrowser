@@ -68,6 +68,13 @@ void BrowserWindow::onBackendCommand(int command, const QString &data)
             m_webView->setCurrentChannel(parts.at(0).toInt(), parts.at(1).toInt(), parts.at(2).toInt());
         break;
     }
+    case CommandClient::CommandSetStreamState: {
+        QStringList parts = data.split(QLatin1Char(','));
+        int state = parts.value(0).toInt();
+        int error = parts.size() > 1 ? parts.value(1).toInt() : -1;
+        m_webView->setStreamState(state, error);
+        break;
+    }
     case CommandClient::CommandQuit:
         qDebug() << "[OpenHbbTV] quit requested by backend";
         QCoreApplication::quit();

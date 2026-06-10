@@ -23,6 +23,7 @@ public:
     void injectHbbTVScripts(const QString &src);
     void injectXmlHttpRequestScripts();
     void setCurrentChannel(const int &onid, const int &tsid, const int &sid);
+    void setStreamState(int state, int error);
     void setLanguage(const QString &language);
     void setScriptDebugging(const QString &scriptDebugging);
 

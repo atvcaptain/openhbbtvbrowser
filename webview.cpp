@@ -106,6 +106,20 @@ void WebView::setCurrentChannel(const int &onid, const int &tsid, const int &sid
     page()->runJavaScript(s);
 }
 
+void WebView::setStreamState(int state, int error)
+{
+    qDebug() << "[OpenHbbTV] setStreamState" << state << error;
+    QString s = QString::fromLatin1("(function() {"
+                                    "  window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};"
+                                    "  if (typeof window.HBBTV_POLYFILL_NS.setStreamState === 'function') {"
+                                    "    window.HBBTV_POLYFILL_NS.setStreamState(%1, %2);"
+                                    "  } else {"
+                                    "    window.HBBTV_POLYFILL_NS.pendingStreamState = [%1, %2];"
+                                    "  }"
+                                    "})();").arg(state).arg(error);
+    page()->runJavaScript(s);
+}
+
 void WebView::setLanguage(const QString &language)
 {
     QWebEngineScript script;
@@ -162,24 +176,31 @@ void WebView::sendKeyEvent(const int &keyCode)
     QMetaEnum metaEnum = QMetaEnum::fromType<VirtualKey::VirtualKeyType>();
 
     QString s = QString::fromLatin1("(function() {"
-                                    "  var keyEvent = new KeyboardEvent('keydown', {"
-                                    "    bubbles : true,"
-                                    "    cancelable : true,"
-                                    "    keyCode : %1"
-                                    "  });"
-                                    "  if (window['%2'] !== 'undefined') {"
-                                    "    delete keyEvent.keyCode;"
-                                    "    Object.defineProperty(keyEvent, 'keyCode', { value: window['%2'] });"
+                                    "  var target = document.activeElement || document.body || document.documentElement || document;"
+                                    "  function makeEvent(type) {"
+                                    "    var e = new KeyboardEvent(type, {"
+                                    "      bubbles : true,"
+                                    "      cancelable : true,"
+                                    "      keyCode : %1,"
+                                    "      which : %1"
+                                    "    });"
+                                    "    if (window['%2'] !== 'undefined') {"
+                                    "      try { delete e.keyCode; } catch (ignore) {}"
+                                    "      try { delete e.which; } catch (ignore) {}"
+                                    "      Object.defineProperty(e, 'keyCode', { value: window['%2'] });"
+                                    "      Object.defineProperty(e, 'which', { value: window['%2'] });"
+                                    "    }"
+                                    "    return e;"
                                     "  }"
-                                    "  document.activeElement.dispatchEvent(keyEvent);"
+                                    "  target.dispatchEvent(makeEvent('keydown'));"
+                                    "  target.dispatchEvent(makeEvent('keyup'));"
                                     "  if (%1 == 13) {"
                                     "    var mouseEvent = new MouseEvent('click', {"
                                     "      bubbles : true,"
-                                    "      cancelable : true,"
+                                    "      cancelable : true"
                                     "    });"
-                                    "    document.activeElement.dispatchEvent(mouseEvent);"
+                                    "    target.dispatchEvent(mouseEvent);"
                                     "  }"
-                                    ""
                                     "})();").arg(keyCode).arg(metaEnum.valueToKey(keyCode));
     qDebug() << "[OpenHbbTV] inject key" << keyCode;
     page()->runJavaScript(s);

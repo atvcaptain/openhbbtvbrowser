@@ -29950,6 +29950,32 @@ class OipfAVControlMapper {
         this.avControlObject.speed = 0;
         this.avControlObject.error = -1;
 
+        window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
+        window.HBBTV_POLYFILL_NS.avControlObjects = window.HBBTV_POLYFILL_NS.avControlObjects || [];
+        if (window.HBBTV_POLYFILL_NS.avControlObjects.indexOf(this.avControlObject) < 0) {
+            window.HBBTV_POLYFILL_NS.avControlObjects.push(this.avControlObject);
+        }
+        window.HBBTV_POLYFILL_NS.setStreamState = function (state, error) {
+            var objects = window.HBBTV_POLYFILL_NS.avControlObjects || [];
+            objects.forEach(function (obj) {
+                if (!obj || !obj.isConnected) {
+                    return;
+                }
+                obj.playState = state;
+                obj.error = error;
+                var playerEvent = new Event('PlayStateChange');
+                playerEvent.state = state;
+                if (obj.onPlayStateChange) {
+                    obj.onPlayStateChange(state);
+                }
+                obj.dispatchEvent(playerEvent);
+            });
+        };
+        if (window.HBBTV_POLYFILL_NS.pendingStreamState) {
+            window.HBBTV_POLYFILL_NS.setStreamState(window.HBBTV_POLYFILL_NS.pendingStreamState[0], window.HBBTV_POLYFILL_NS.pendingStreamState[1]);
+            window.HBBTV_POLYFILL_NS.pendingStreamState = null;
+        }
+
         this.mapAvControlToHtml5Video();
         this.watchAvControlObjectMutations(this.avControlObject);
     }
