@@ -14,12 +14,14 @@
 #include <QTimer>
 #include <QWidget>
 #include <QDateTime>
+#include <QCoreApplication>
 
 WebView::WebView(QWidget *parent)
     : QWebEngineView(parent)
     , m_streamState(0)
     , m_streamOverlayVisible(true)
     , m_streamOverlayHoldUntilMs(0)
+    , m_streamOverlayGeometryValid(false)
     , m_teletextReturnInProgress(false)
     , m_teletextDigitTimer(new QTimer(this))
     , m_quitMsg(new QLabel)
@@ -188,11 +190,20 @@ void WebView::showApplicationOverlay(const QString &reason)
         m_streamOverlayHoldUntilMs = QDateTime::currentMSecsSinceEpoch() + 2000;
     qDebug() << "[OpenHbbTV] show application overlay" << reason;
     QWidget *top = window();
-    if (top && !top->isVisible()) {
-        top->showFullScreen();
-        top->raise();
-        top->activateWindow();
-        qDebug() << "[OpenHbbTV] show browser window for overlay" << reason;
+    if (top) {
+        if (m_streamOverlayGeometryValid) {
+            top->setGeometry(m_streamOverlaySavedGeometry);
+            qDebug() << "[OpenHbbTV] restore browser window geometry" << m_streamOverlaySavedGeometry << reason;
+        }
+        if (!top->isVisible()) {
+            top->showFullScreen();
+            top->raise();
+            top->activateWindow();
+            qDebug() << "[OpenHbbTV] show browser window for overlay" << reason;
+        } else {
+            top->raise();
+            top->activateWindow();
+        }
     }
     page()->runJavaScript(QString::fromLatin1(
         "(function() {"
@@ -221,9 +232,30 @@ void WebView::hideApplicationOverlay(const QString &reason)
         m_streamOverlayHoldUntilMs = 0;
     qDebug() << "[OpenHbbTV] hide application overlay" << reason;
     QWidget *top = window();
-    if (top && top->isVisible()) {
-        top->hide();
-        qDebug() << "[OpenHbbTV] hide browser window for stream" << reason;
+    if (top) {
+        if (!m_streamOverlayGeometryValid && top->geometry().isValid()) {
+            m_streamOverlaySavedGeometry = top->geometry();
+            m_streamOverlayGeometryValid = true;
+            qDebug() << "[OpenHbbTV] save browser window geometry" << m_streamOverlaySavedGeometry;
+        }
+
+        // On Vu+/libvupl, QWidget::hide() can leave the last EGL frame in the
+        // hardware overlay even though Qt reports visible=false. Move/resize
+        // the native window out of the video plane first, then hide/lower it.
+        // This gives the libvupl integration a real SetPosition update before
+        // the hide operation and prevents the stale browser frame from covering
+        // the E2/GStreamer video.
+        top->lower();
+        top->setGeometry(-4096, -4096, 1, 1);
+        qDebug() << "[OpenHbbTV] move browser window offscreen for stream" << reason << top->geometry();
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
+        if (top->isVisible()) {
+            top->hide();
+            qDebug() << "[OpenHbbTV] hide browser window for stream" << reason;
+        } else {
+            qDebug() << "[OpenHbbTV] browser window already hidden for stream" << reason;
+        }
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
     }
 }
 

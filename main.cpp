@@ -57,8 +57,8 @@ int main(int argc, char *argv[])
     qputenv("QT_QPA_EGLFS_HIDECURSOR", QByteArrayLiteral("1"));
     installOpenHbbTVDebugLogger();
     qDebug() << "[OpenHbbTV] process start argc" << argc;
-    qDebug() << "[OpenHbbTV] process build id e2-rcu-owner-hard-sync-20260610";
-    qDebug() << "[OpenHbbTV] build mode e2-rcu-owner-syncfix";
+    qDebug() << "[OpenHbbTV] process build id e2-rcu-owner-vupl-offscreen-hide-20260610";
+    qDebug() << "[OpenHbbTV] build mode e2-rcu-owner-vupl-offscreen-hide";
 #if defined(EMBEDDED_BUILD)
     HardwareProfile::applyEnvironment(argc, argv);
 

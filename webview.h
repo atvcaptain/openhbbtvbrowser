@@ -6,6 +6,7 @@
 #include <QWebEngineUrlRequestInterceptor>
 #include <QUrl>
 #include <QTimer>
+#include <QRect>
 
 class RequestLogger : public QWebEngineUrlRequestInterceptor {
 public:
@@ -65,6 +66,8 @@ private:
     int m_streamState;
     bool m_streamOverlayVisible;
     qint64 m_streamOverlayHoldUntilMs;
+    QRect m_streamOverlaySavedGeometry;
+    bool m_streamOverlayGeometryValid;
     bool m_teletextReturnInProgress;
     QString m_teletextDigitBuffer;
     QTimer *m_teletextDigitTimer;
