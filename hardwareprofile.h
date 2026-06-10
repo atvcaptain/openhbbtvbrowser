@@ -9,6 +9,7 @@ class HardwareProfile
 public:
     static void applyEnvironment(int argc, char *argv[]);
     static QString remoteDevice(int argc, char *argv[]);
+    static QStringList remoteDevices(int argc, char *argv[]);
     static bool filterRemoteNavigationKeys(int argc, char *argv[]);
     static QString modelSummary();
 
@@ -19,6 +20,7 @@ private:
     static QString readHardwareText();
     static QString detectPlatform();
     static QString detectRemoteDevice();
+    static QStringList detectRemoteDevices();
     static bool isTruthy(const QString &value);
     static bool isFalsy(const QString &value);
 };

@@ -10,6 +10,7 @@
 #include <QUrl>
 #include <QWebEngineSettings>
 #include <QWebEngineProfile>
+#include <QList>
 
 #if defined(EMBEDDED_BUILD)
 #include <sys/stat.h>
@@ -163,12 +164,17 @@ int main(int argc, char *argv[])
 #endif
 
 #if defined(EMBEDDED_BUILD)
-    const QString remoteDevice = HardwareProfile::remoteDevice(argc, argv);
+    const QStringList remoteDevices = HardwareProfile::remoteDevices(argc, argv);
     const bool filterNavigationKeys = HardwareProfile::filterRemoteNavigationKeys(argc, argv);
-    qDebug() << "[OpenHbbTV] remote device" << remoteDevice
+    qDebug() << "[OpenHbbTV] remote devices" << remoteDevices
              << "direct-navigation-keys" << (!filterNavigationKeys);
-    auto remote = new RemoteController(remoteDevice, filterNavigationKeys);
-    QObject::connect(remote, &RemoteController::activate, window->webView(), &WebView::sendKeyEvent);
+    QList<RemoteController *> remotes;
+    for (const QString &remoteDevice : remoteDevices) {
+        auto remote = new RemoteController(remoteDevice, filterNavigationKeys);
+        remote->setParent(window);
+        remotes << remote;
+        QObject::connect(remote, &RemoteController::activate, window->webView(), &WebView::sendKeyEvent);
+    }
 #else
     auto filter = new WindowEventFilter();
     app.installEventFilter(filter);

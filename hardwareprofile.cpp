@@ -158,53 +158,105 @@ void HardwareProfile::applyEnvironment(int argc, char *argv[])
                  qgetenv("QT_QPA_EGLFS_INTEGRATION").constData());
 }
 
-QString HardwareProfile::detectRemoteDevice()
+static void appendUnique(QStringList &list, const QString &value)
 {
+    if (!value.isEmpty() && !list.contains(value))
+        list << value;
+}
+
+QStringList HardwareProfile::detectRemoteDevices()
+{
+    QStringList preferred;
+    QStringList keyboard;
+    QStringList all;
+
     QFile devices(QStringLiteral("/proc/bus/input/devices"));
     if (devices.open(QIODevice::ReadOnly)) {
         const QString content = QString::fromLocal8Bit(devices.readAll());
         const QStringList blocks = content.split(QRegularExpression(QStringLiteral("\\n\\s*\\n")), Qt::SkipEmptyParts);
-        QString firstEvent;
-        QString firstKeyboardEvent;
-
         const QRegularExpression eventRe(QStringLiteral("event[0-9]+"));
+
         for (const QString &block : blocks) {
-            const QRegularExpressionMatch match = eventRe.match(block);
-            if (!match.hasMatch())
+            const QRegularExpressionMatchIterator matches = eventRe.globalMatch(block);
+            QStringList blockEvents;
+            QRegularExpressionMatch match;
+            QRegularExpressionMatchIterator it = eventRe.globalMatch(block);
+            while (it.hasNext()) {
+                match = it.next();
+                appendUnique(blockEvents, QStringLiteral("/dev/input/") + match.captured(0));
+            }
+            if (blockEvents.isEmpty())
                 continue;
 
-            const QString device = QStringLiteral("/dev/input/") + match.captured(0);
-            if (firstEvent.isEmpty())
-                firstEvent = device;
-
             const QString lower = block.toLower();
-            if (firstKeyboardEvent.isEmpty() && lower.contains(QStringLiteral("kbd")))
-                firstKeyboardEvent = device;
-
-            if (lower.contains(QStringLiteral("remote")) || lower.contains(QStringLiteral(" rc")) ||
-                lower.contains(QStringLiteral("ir")) || lower.contains(QStringLiteral("frontpanel")) ||
-                lower.contains(QStringLiteral("front panel")) || lower.contains(QStringLiteral("meson"))) {
-                return device;
+            for (const QString &device : blockEvents) {
+                appendUnique(all, device);
+                if (lower.contains(QStringLiteral("kbd")))
+                    appendUnique(keyboard, device);
+                if (lower.contains(QStringLiteral("remote")) || lower.contains(QStringLiteral(" rc")) ||
+                    lower.contains(QStringLiteral("ir")) || lower.contains(QStringLiteral("frontpanel")) ||
+                    lower.contains(QStringLiteral("front panel")) || lower.contains(QStringLiteral("meson")) ||
+                    lower.contains(QStringLiteral("dreambox")) || lower.contains(QStringLiteral("key"))) {
+                    appendUnique(preferred, device);
+                }
             }
         }
-
-        if (!firstKeyboardEvent.isEmpty())
-            return firstKeyboardEvent;
     }
 
-    if (QFileInfo::exists(QStringLiteral("/dev/input/event1")))
-        return QStringLiteral("/dev/input/event1");
-    return QStringLiteral("/dev/input/event0");
+    QStringList result;
+    for (const QString &device : preferred)
+        appendUnique(result, device);
+    for (const QString &device : keyboard)
+        appendUnique(result, device);
+    for (const QString &device : all)
+        appendUnique(result, device);
+
+    // Last-resort fallback for minimal systems without useful
+    // /proc/bus/input/devices metadata.
+    QDir inputDir(QStringLiteral("/dev/input"));
+    const QStringList events = inputDir.entryList(QStringList() << QStringLiteral("event*"), QDir::System | QDir::Files, QDir::Name);
+    for (const QString &event : events)
+        appendUnique(result, inputDir.absoluteFilePath(event));
+
+    if (result.isEmpty()) {
+        if (QFileInfo::exists(QStringLiteral("/dev/input/event1")))
+            result << QStringLiteral("/dev/input/event1");
+        else
+            result << QStringLiteral("/dev/input/event0");
+    }
+
+    return result;
+}
+
+QString HardwareProfile::detectRemoteDevice()
+{
+    return detectRemoteDevices().value(0);
+}
+
+QStringList HardwareProfile::remoteDevices(int argc, char *argv[])
+{
+    QString configured = argumentValue(argc, argv, QStringLiteral("openhbbtv-remote-device"));
+    if (configured.isEmpty())
+        configured = environmentValue("OPENHBBTV_REMOTE_DEVICE");
+
+    if (!configured.isEmpty() && configured != QStringLiteral("auto")) {
+        if (configured == QStringLiteral("all"))
+            return detectRemoteDevices();
+        QStringList devices;
+        const QStringList parts = configured.split(QRegularExpression(QStringLiteral("[,:;\\s]+")), Qt::SkipEmptyParts);
+        for (const QString &part : parts)
+            appendUnique(devices, part.trimmed());
+        return devices;
+    }
+
+    // Auto mode opens all plausible input devices. This avoids model-specific
+    // eventX assumptions on boxes where the RCU is not event1.
+    return detectRemoteDevices();
 }
 
 QString HardwareProfile::remoteDevice(int argc, char *argv[])
 {
-    QString device = argumentValue(argc, argv, QStringLiteral("openhbbtv-remote-device"));
-    if (device.isEmpty())
-        device = environmentValue("OPENHBBTV_REMOTE_DEVICE");
-    if (device.isEmpty() || device == QStringLiteral("auto"))
-        device = detectRemoteDevice();
-    return device;
+    return remoteDevices(argc, argv).value(0);
 }
 
 bool HardwareProfile::filterRemoteNavigationKeys(int argc, char *argv[])

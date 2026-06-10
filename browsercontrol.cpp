@@ -18,8 +18,10 @@ RemoteController::RemoteController(const QString &device, bool filterNavigationK
     : m_muteToggle(false)
     , m_filterNavigationKeys(filterNavigationKeys)
 {
-    m_fd = ::open(device.toLocal8Bit().constData(), O_RDONLY, 0);
+    qDebug() << "[OpenHbbTV] open remote input" << device;
+    m_fd = ::open(device.toLocal8Bit().constData(), O_RDONLY | O_NONBLOCK, 0);
     if (m_fd >= 0) {
+        qDebug() << "[OpenHbbTV] remote input opened" << device;
         m_notify = new QSocketNotifier(m_fd, QSocketNotifier::Read, this);
         connect(m_notify, &QSocketNotifier::activated, this, &RemoteController::readKeycode);
     } else {
