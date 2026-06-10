@@ -272,6 +272,28 @@ bool WebView::isStreamActive() const
     return m_streamState == 1 || m_streamState == 2;
 }
 
+bool WebView::nativeNavigationKeysEnabled() const
+{
+    const QString value = QString::fromLocal8Bit(qgetenv("OPENHBBTV_NATIVE_NAVIGATION_KEYS")).trimmed().toLower();
+    return value == QStringLiteral("1") || value == QStringLiteral("yes") ||
+           value == QStringLiteral("true") || value == QStringLiteral("on") ||
+           value == QStringLiteral("enabled");
+}
+
+bool WebView::isNavigationOrEnterKey(int keyCode) const
+{
+    switch (keyCode) {
+    case VirtualKey::VK_LEFT:
+    case VirtualKey::VK_UP:
+    case VirtualKey::VK_RIGHT:
+    case VirtualKey::VK_DOWN:
+    case VirtualKey::VK_ENTER:
+        return true;
+    default:
+        return false;
+    }
+}
+
 bool WebView::handleStreamKeyFallback(int keyCode)
 {
     if (!isStreamActive())
@@ -493,8 +515,20 @@ void WebView::sendKeyEvent(const int &keyCode)
     if (!m_teletextDigitBuffer.isEmpty())
         flushTeletextDigitBuffer();
 
+    const bool nativeNav = nativeNavigationKeysEnabled();
+
     if (handleStreamKeyFallback(keyCode))
         return;
+
+    if (nativeNav && isNavigationOrEnterKey(keyCode)) {
+        if (isStreamActive() && !m_streamOverlayVisible) {
+            qDebug() << "[OpenHbbTV] stream hidden navigation key: show application overlay" << keyCode;
+            showApplicationOverlay(QStringLiteral("stream hidden navigation key"));
+        } else {
+            qDebug() << "[OpenHbbTV] ignore direct navigation key; native Qt/libvupl handles visible UI" << keyCode;
+        }
+        return;
+    }
 
     if (isStreamActive())
         showApplicationOverlay(QStringLiteral("stream key"));
