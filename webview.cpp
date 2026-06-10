@@ -10,9 +10,10 @@
 #include <QWebEngineHistory>
 #include <QWebEnginePage>
 #include <QFileInfo>
+#include <QTimer>
 
 WebView::WebView(QWidget *parent)
-    : QWebEngineView(parent), m_quitMsg(new QLabel), m_quitMsgStatus(0)
+    : QWebEngineView(parent), m_quitMsg(new QLabel), m_teletextDigitTimer(new QTimer(this)), m_quitMsgStatus(0)
 {
     QScreen *screen = QGuiApplication::primaryScreen();
     QRect screenGeometry = screen->geometry();
@@ -24,6 +25,10 @@ WebView::WebView(QWidget *parent)
     int y = (screenGeometry.height() - m_quitMsg->height()) / 2;
     m_quitMsg->setGeometry(x, y, 480, 120);
     m_quitMsg->hide();
+
+    m_teletextDigitTimer->setSingleShot(true);
+    m_teletextDigitTimer->setInterval(1200);
+    connect(m_teletextDigitTimer, &QTimer::timeout, this, &WebView::flushTeletextDigitBuffer);
 
     connect(this, &QWebEngineView::titleChanged, this, &WebView::titleChanged);
     connect(this, &QWebEngineView::loadStarted, this, [this]() { qDebug() << "[OpenHbbTV] loadStarted" << url().toString(); });
@@ -203,20 +208,90 @@ bool WebView::isTeletextUrl() const
            full.contains(QStringLiteral("vtx."));
 }
 
+bool WebView::isTeletextDigitKey(int keyCode) const
+{
+    return keyCode >= VirtualKey::VK_0 && keyCode <= VirtualKey::VK_9;
+}
+
+QChar WebView::teletextDigitFromKeyCode(int keyCode) const
+{
+    if (!isTeletextDigitKey(keyCode))
+        return QChar();
+    return QChar(QLatin1Char('0' + (keyCode - VirtualKey::VK_0)));
+}
+
+bool WebView::handleTeletextDigit(int keyCode)
+{
+    if (!isTeletextUrl() || !isTeletextDigitKey(keyCode))
+        return false;
+
+    const QChar digit = teletextDigitFromKeyCode(keyCode);
+
+    // ARD HbbTV teletext pages are addressed from 100 to 899. A leading
+    // zero is therefore not a page-number prefix; consume it immediately
+    // and reopen the broadcaster start application via Enigma2/eHbbTV.
+    // Zeros in the second or third position remain normal page input, e.g.
+    // 100, 101, 110.
+    if (m_teletextDigitBuffer.isEmpty() && digit == QLatin1Char('0')) {
+        m_teletextDigitTimer->stop();
+        qDebug() << "[OpenHbbTV] teletext leading zero request start application";
+        openTeletextStartApplication();
+        return true;
+    }
+
+    if (m_teletextDigitBuffer.size() >= 3)
+        m_teletextDigitBuffer.clear();
+
+    m_teletextDigitBuffer.append(digit);
+    qDebug() << "[OpenHbbTV] teletext digit buffer" << m_teletextDigitBuffer;
+
+    if (m_teletextDigitBuffer.size() < 3) {
+        m_teletextDigitTimer->start();
+        return true;
+    }
+
+    m_teletextDigitTimer->stop();
+    const QString page = m_teletextDigitBuffer;
+    m_teletextDigitBuffer.clear();
+
+    qDebug() << "[OpenHbbTV] teletext page input" << page;
+    for (const QChar ch : page)
+        injectKeyEvent(VirtualKey::VK_0 + ch.digitValue());
+    return true;
+}
+
+void WebView::flushTeletextDigitBuffer()
+{
+    if (m_teletextDigitBuffer.isEmpty())
+        return;
+
+    const QString page = m_teletextDigitBuffer;
+    m_teletextDigitBuffer.clear();
+    qDebug() << "[OpenHbbTV] flush teletext digit buffer" << page;
+
+    for (const QChar ch : page) {
+        if (ch.isDigit())
+            injectKeyEvent(VirtualKey::VK_0 + ch.digitValue());
+    }
+}
+
+void WebView::openTeletextStartApplication()
+{
+    // Reopen the broadcaster start application via Enigma2/eHbbTV instead
+    // of passing an invalid teletext page request back to the page.
+    qDebug() << "[OpenHbbTV] teletext request start application via E2";
+    emit hbbtvCommand(CommandClient::CommandCreateApplication, QStringLiteral("dvb://current.ait/13.1?autoshow=1"));
+}
+
 void WebView::sendKeyEvent(const int &keyCode)
 {
     qDebug() << "[OpenHbbTV] sendKeyEvent" << keyCode;
 
-    if (keyCode == VirtualKey::VK_0 && isTeletextUrl()) {
-        // ARD Videotext uses key 0 as "Startleiste". Do not inject the
-        // numeric key into the teletext page here: some teletext pages treat
-        // it as page number input (000) and immediately reload the VTX app.
-        // Route the request through the HbbTV backend instead, so Enigma2
-        // resolves the AIT application locator and reopens the Red Button app.
-        qDebug() << "[OpenHbbTV] teletext key 0 request start application via E2";
-        emit hbbtvCommand(CommandClient::CommandCreateApplication, QStringLiteral("dvb://current.ait/13.1?autoshow=1"));
+    if (handleTeletextDigit(keyCode))
         return;
-    }
+
+    if (!m_teletextDigitBuffer.isEmpty())
+        flushTeletextDigitBuffer();
 
     if (keyCode == VirtualKey::VK_BACK) {
         if (!page()->history()->canGoBack()) {
@@ -235,6 +310,11 @@ void WebView::sendKeyEvent(const int &keyCode)
         }
     }
 
+    injectKeyEvent(keyCode);
+}
+
+void WebView::injectKeyEvent(int keyCode)
+{
     QMetaEnum metaEnum = QMetaEnum::fromType<VirtualKey::VirtualKeyType>();
 
     QString s = QString::fromLatin1("(function() {"

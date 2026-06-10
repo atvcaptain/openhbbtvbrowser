@@ -5,6 +5,7 @@
 #include <QLabel>
 #include <QWebEngineUrlRequestInterceptor>
 #include <QUrl>
+#include <QTimer>
 
 class RequestLogger : public QWebEngineUrlRequestInterceptor {
 public:
@@ -43,7 +44,15 @@ protected Q_SLOTS:
 private:
     void dispatchHbbtvBridgeCommand(const QString &command);
     bool isTeletextUrl() const;
+    bool isTeletextDigitKey(int keyCode) const;
+    QChar teletextDigitFromKeyCode(int keyCode) const;
+    bool handleTeletextDigit(int keyCode);
+    void flushTeletextDigitBuffer();
+    void openTeletextStartApplication();
+    void injectKeyEvent(int keyCode);
     QUrl m_initialUrl;
+    QString m_teletextDigitBuffer;
+    QTimer *m_teletextDigitTimer;
     QLabel *m_quitMsg;
     int m_quitMsgStatus;
 };
