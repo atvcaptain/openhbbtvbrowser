@@ -1,5 +1,6 @@
 #include "browsercontrol.h"
 #include "browserwindow.h"
+#include "debuglog.h"
 #include "hardwareprofile.h"
 #include "webview.h"
 #include <QApplication>
@@ -49,6 +50,8 @@ QUrl commandLineUrlArgument()
 
 int main(int argc, char *argv[])
 {
+    installOpenHbbTVDebugLogger();
+    qDebug() << "[OpenHbbTV] process start argc" << argc;
 #if defined(EMBEDDED_BUILD)
     HardwareProfile::applyEnvironment(argc, argv);
 
@@ -133,6 +136,7 @@ int main(int argc, char *argv[])
     bool enableNetlog = parser.isSet("enable-netlog");
 
     QUrl url = commandLineUrlArgument();
+    qDebug() << "[OpenHbbTV] command line url" << url.toString();
 
     auto window = new BrowserWindow();
 #if defined(EMBEDDED_BUILD)
@@ -148,10 +152,13 @@ int main(int argc, char *argv[])
         window->webView()->setCurrentChannel(onid, tsid, sid);
     window->webView()->setLanguage(QStringLiteral("DEU")); // TODO:
     window->webView()->setScriptDebugging(scriptDebugging ? QStringLiteral("true") : QStringLiteral("false"));
+    qDebug() << "[OpenHbbTV] set initial url" << url.toString();
     window->webView()->setUrl(url);
 #if defined(EMBEDDED_BUILD)
+    qDebug() << "[OpenHbbTV] showFullScreen" << window->geometry();
     window->showFullScreen();
 #else
+    qDebug() << "[OpenHbbTV] show" << window->geometry();
     window->show();
 #endif
 
@@ -173,5 +180,7 @@ int main(int argc, char *argv[])
         window->webView()->page()->profile()->setUrlRequestInterceptor(new RequestLogger());
     }
 
-    return app.exec();
+    int result = app.exec();
+    qDebug() << "[OpenHbbTV] process exit" << result;
+    return result;
 }

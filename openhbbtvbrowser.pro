@@ -12,7 +12,8 @@ HEADERS += \
     browserwindow.h \
     webpage.h \
     webview.h \
-    hardwareprofile.h
+    hardwareprofile.h \
+    debuglog.h
 
 SOURCES += \
     main.cpp \
@@ -20,6 +21,7 @@ SOURCES += \
     browserwindow.cpp \
     webpage.cpp \
     webview.cpp \
-    hardwareprofile.cpp
+    hardwareprofile.cpp \
+    debuglog.cpp
 
 RESOURCES += openhbbtvbrowser.qrc

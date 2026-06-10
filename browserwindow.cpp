@@ -20,6 +20,25 @@ BrowserWindow::BrowserWindow(QWidget *parent, Qt::WindowFlags flags)
 
     connect(m_webView, &WebView::hbbtvCommand, this, &BrowserWindow::sendHbbtvCommand);
     connect(m_commandClient, &CommandClient::commandReceived, this, &BrowserWindow::onBackendCommand);
+    qDebug() << "[OpenHbbTV] BrowserWindow created";
+}
+
+void BrowserWindow::showEvent(QShowEvent *event)
+{
+    qDebug() << "[OpenHbbTV] BrowserWindow show" << geometry() << "visible" << isVisible();
+    QMainWindow::showEvent(event);
+}
+
+void BrowserWindow::hideEvent(QHideEvent *event)
+{
+    qDebug() << "[OpenHbbTV] BrowserWindow hide" << geometry() << "visible" << isVisible();
+    QMainWindow::hideEvent(event);
+}
+
+void BrowserWindow::closeEvent(QCloseEvent *event)
+{
+    qDebug() << "[OpenHbbTV] BrowserWindow close" << geometry() << "visible" << isVisible();
+    QMainWindow::closeEvent(event);
 }
 
 WebView *BrowserWindow::webView()
@@ -29,14 +48,18 @@ WebView *BrowserWindow::webView()
 
 void BrowserWindow::sendHbbtvCommand(int command, const QString &data)
 {
-    m_commandClient->writeCommand(command, data);
+    qDebug() << "[OpenHbbTV] browser->e2 command" << command << data;
+    const bool ok = m_commandClient->writeCommand(command, data);
+    qDebug() << "[OpenHbbTV] browser->e2 command result" << command << ok;
 }
 
 void BrowserWindow::onBackendCommand(int command, const QString &data)
 {
+    qDebug() << "[OpenHbbTV] e2->browser command" << command << data;
     switch (command) {
     case CommandClient::CommandOpenUrl:
         if (!data.isEmpty())
+            qDebug() << "[OpenHbbTV] open url from backend" << data;
             m_webView->setUrl(QUrl::fromUserInput(data));
         break;
     case CommandClient::CommandSetCurrentChannel: {
@@ -46,6 +69,7 @@ void BrowserWindow::onBackendCommand(int command, const QString &data)
         break;
     }
     case CommandClient::CommandQuit:
+        qDebug() << "[OpenHbbTV] quit requested by backend";
         QCoreApplication::quit();
         break;
     default:

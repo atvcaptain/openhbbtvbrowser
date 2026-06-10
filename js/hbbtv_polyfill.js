@@ -30482,6 +30482,7 @@ const hbbtvFn = function () {
     };
 
     Application.prototype.show = function () {
+        window.signalopenhbbtvbrowser && window.signalopenhbbtvbrowser('LOG:Application.show');
         if (this._document) {
             this._document.body.style.visibility = 'visible';
             return (this._visible = true);
@@ -30490,6 +30491,7 @@ const hbbtvFn = function () {
     };
 
     Application.prototype.hide = function () {
+        window.signalopenhbbtvbrowser && window.signalopenhbbtvbrowser('LOG:Application.hide');
         if (this._document) {
             this._document.body.style.visibility = 'hidden';
             this._visible = false;
@@ -30499,6 +30501,7 @@ const hbbtvFn = function () {
     };
 
     Application.prototype.createApplication = function (uri, createChild) {
+        window.signalopenhbbtvbrowser && window.signalopenhbbtvbrowser('LOG:Application.createApplication:' + uri);
         window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: createApplication: ' + uri);
 
         var newLocation = uri;

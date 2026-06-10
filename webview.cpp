@@ -15,7 +15,7 @@ WebView::WebView(QWidget *parent)
 {
     QScreen *screen = QGuiApplication::primaryScreen();
     QRect screenGeometry = screen->geometry();
-    m_quitMsg->setText("Press Power Key to Quit");
+    m_quitMsg->setText("Back: no browser history");
     m_quitMsg->setGeometry(0, 0, 480, 120);
     m_quitMsg->setAlignment(Qt::AlignCenter);
     m_quitMsg->setStyleSheet("background: black; color: white; font: 24pt;");
@@ -25,6 +25,9 @@ WebView::WebView(QWidget *parent)
     m_quitMsg->hide();
 
     connect(this, &QWebEngineView::titleChanged, this, &WebView::titleChanged);
+    connect(this, &QWebEngineView::loadStarted, this, [this]() { qDebug() << "[OpenHbbTV] loadStarted" << url().toString(); });
+    connect(this, &QWebEngineView::loadProgress, this, [this](int progress) { qDebug() << "[OpenHbbTV] loadProgress" << progress << url().toString(); });
+    connect(this, &QWebEngineView::urlChanged, this, [this](const QUrl &u) { qDebug() << "[OpenHbbTV] urlChanged" << u.toString(); });
     connect(this, &QWebEngineView::loadFinished, this, &WebView::loadFinished);
 }
 
@@ -99,6 +102,7 @@ void WebView::setCurrentChannel(const int &onid, const int &tsid, const int &sid
     script.setRunsOnSubFrames(true);
     script.setWorldId(QWebEngineScript::MainWorld);
     page()->scripts().insert(script);
+    qDebug() << "[OpenHbbTV] setCurrentChannel" << onid << tsid << sid;
     page()->runJavaScript(s);
 }
 
@@ -137,6 +141,7 @@ void WebView::setScriptDebugging(const QString &scriptDebugging)
 
 void WebView::sendKeyEvent(const int &keyCode)
 {
+    qDebug() << "[OpenHbbTV] sendKeyEvent" << keyCode;
     if (keyCode == VirtualKey::VK_BACK) {
         if (!page()->history()->canGoBack()) {
             if (!m_quitMsgStatus) {
@@ -176,15 +181,19 @@ void WebView::sendKeyEvent(const int &keyCode)
                                     "  }"
                                     ""
                                     "})();").arg(keyCode).arg(metaEnum.valueToKey(keyCode));
+    qDebug() << "[OpenHbbTV] inject key" << keyCode;
     page()->runJavaScript(s);
 }
 
 void WebView::dispatchHbbtvBridgeCommand(const QString &rawCommand)
 {
+    qDebug() << "[OpenHbbTV] raw bridge command" << rawCommand;
     QString command = rawCommand;
     const int seqPos = command.lastIndexOf(QStringLiteral("||"));
     if (seqPos >= 0)
         command.truncate(seqPos);
+
+    qDebug() << "[OpenHbbTV] normalized bridge command" << command;
 
     if (command == QStringLiteral("BROADCAST_PLAY")) {
         emit hbbtvCommand(CommandClient::CommandBroadcastPlay, QString());
@@ -223,6 +232,7 @@ void WebView::dispatchHbbtvBridgeCommand(const QString &rawCommand)
 
 void WebView::titleChanged(const QString &title)
 {
+    qDebug() << "[OpenHbbTV] titleChanged" << title;
     if (title.startsWith(QStringLiteral("OPENATV_HBBTV:"))) {
         dispatchHbbtvBridgeCommand(title.mid(14));
     } else if (title.startsWith(QStringLiteral("OipfVideoBroadcastEmbeddedObject"))) {
@@ -236,6 +246,7 @@ void WebView::titleChanged(const QString &title)
 
 void WebView::loadFinished(bool ok)
 {
+    qDebug() << "[OpenHbbTV] loadFinished" << ok << url().toString();
     if (ok) {
         if (size().width() == 1920 && size().height() == 1080)
             page()->runJavaScript(QString::fromLatin1("document.body.style.setProperty('zoom', '150%');"));

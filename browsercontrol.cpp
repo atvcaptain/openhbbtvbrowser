@@ -4,6 +4,7 @@
 #include <QKeyEvent>
 #include <QDataStream>
 #include <QIODevice>
+#include <QDebug>
 
 #if defined(EMBEDDED_BUILD)
 
@@ -98,10 +99,13 @@ void RemoteController::readKeycode()
             case KEY_INFO:          vk = VirtualKey::VK_INFO; break;
             case KEY_TEXT:          vk = VirtualKey::VK_TELETEXT; break;
             case KEY_SUBTITLE:      vk = VirtualKey::VK_SUBTITLE; break;
-            case KEY_MENU:          [[fallthrough]];
-            case KEY_POWER:         QApplication::quit(); break;
+            case KEY_MENU:          vk = VirtualKey::VK_MENU; break;
+            case KEY_POWER:         vk = VirtualKey::VK_POWER; break;
             }
-            if (vk != VirtualKey::VK_UNDEFINED) emit activate(vk);
+            if (vk != VirtualKey::VK_UNDEFINED) {
+                qDebug() << "[OpenHbbTV] evdev key" << buffer[i].code << "-> virtual" << vk;
+                emit activate(vk);
+            }
         }
     }
 }
@@ -190,9 +194,12 @@ bool WindowEventFilter::eventFilter(QObject *obj, QEvent *event)
         case Qt::Key_L:             vk = VirtualKey::VK_STOP; break;
         case Qt::Key_P:             vk = VirtualKey::VK_FAST_FWD; break;
         case Qt::Key_N:             vk = VirtualKey::VK_REWIND; break;
-        case Qt::Key_Q:             QApplication::quit(); break;
+        case Qt::Key_Q:             vk = VirtualKey::VK_Q; break;
         }
-        if (vk != VirtualKey::VK_UNDEFINED) emit activate(vk);
+        if (vk != VirtualKey::VK_UNDEFINED) {
+            qDebug() << "[OpenHbbTV] qt key" << keyEvent->key() << "-> virtual" << vk;
+            emit activate(vk);
+        }
         return true;
     }
 
@@ -206,7 +213,12 @@ CommandClient::CommandClient(const QString &sockFile)
     connect(m_socket, &QLocalSocket::disconnected, this, [this]() { m_rxBuffer.clear(); });
 
     m_socket->abort();
+    qDebug() << "[OpenHbbTV] IPC connect" << sockFile;
     m_socket->connectToServer(sockFile);
+    connect(m_socket, &QLocalSocket::connected, this, []() { qDebug() << "[OpenHbbTV] IPC connected"; });
+    connect(m_socket, QOverload<QLocalSocket::LocalSocketError>::of(&QLocalSocket::error), this, [this](QLocalSocket::LocalSocketError error) {
+        qWarning() << "[OpenHbbTV] IPC error" << error << m_socket->errorString();
+    });
 }
 
 void CommandClient::readCommand()
@@ -242,7 +254,7 @@ void CommandClient::readCommand()
         m_rxBuffer.remove(0, 12 + dataSize);
 
         QString data = QString::fromUtf8(payload);
-        qDebug() << "command received" << command << data;
+        qDebug() << "[OpenHbbTV] IPC received" << command << data;
         emit commandReceived(static_cast<int>(command), data);
     }
 }
@@ -257,8 +269,10 @@ bool CommandClient::writeCommand(int command, const QString &data)
     if (m_socket->state() == QLocalSocket::UnconnectedState)
         m_socket->connectToServer(m_socket->serverName());
 
-    if (!m_socket->waitForConnected(1000) && !m_socket->isValid())
+    if (!m_socket->waitForConnected(1000) && !m_socket->isValid()) {
+        qWarning() << "[OpenHbbTV] IPC write failed, not connected" << command << m_socket->errorString();
         return false;
+    }
 
     QByteArray payload = data.toUtf8();
 
@@ -269,10 +283,17 @@ bool CommandClient::writeCommand(int command, const QString &data)
               << static_cast<quint32>(command)
               << static_cast<quint32>(payload.size());
 
-    if (m_socket->write(header) != header.size())
+    if (m_socket->write(header) != header.size()) {
+        qWarning() << "[OpenHbbTV] IPC header write failed" << command << m_socket->errorString();
         return false;
-    if (!payload.isEmpty() && m_socket->write(payload) != payload.size())
+    }
+    if (!payload.isEmpty() && m_socket->write(payload) != payload.size()) {
+        qWarning() << "[OpenHbbTV] IPC payload write failed" << command << m_socket->errorString();
         return false;
+    }
 
-    return m_socket->waitForBytesWritten(1000);
+    const bool written = m_socket->waitForBytesWritten(1000);
+    if (!written)
+        qWarning() << "[OpenHbbTV] IPC waitForBytesWritten timeout" << command << m_socket->errorString();
+    return written;
 }
