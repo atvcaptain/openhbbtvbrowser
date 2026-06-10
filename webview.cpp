@@ -13,7 +13,7 @@
 #include <QTimer>
 
 WebView::WebView(QWidget *parent)
-    : QWebEngineView(parent), m_quitMsg(new QLabel), m_teletextDigitTimer(new QTimer(this)), m_quitMsgStatus(0)
+    : QWebEngineView(parent), m_teletextReturnInProgress(false), m_quitMsg(new QLabel), m_teletextDigitTimer(new QTimer(this)), m_quitMsgStatus(0)
 {
     QScreen *screen = QGuiApplication::primaryScreen();
     QRect screenGeometry = screen->geometry();
@@ -33,7 +33,15 @@ WebView::WebView(QWidget *parent)
     connect(this, &QWebEngineView::titleChanged, this, &WebView::titleChanged);
     connect(this, &QWebEngineView::loadStarted, this, [this]() { qDebug() << "[OpenHbbTV] loadStarted" << url().toString(); });
     connect(this, &QWebEngineView::loadProgress, this, [this](int progress) { qDebug() << "[OpenHbbTV] loadProgress" << progress << url().toString(); });
-    connect(this, &QWebEngineView::urlChanged, this, [this](const QUrl &u) { qDebug() << "[OpenHbbTV] urlChanged" << u.toString(); });
+    connect(this, &QWebEngineView::urlChanged, this, [this](const QUrl &u) {
+        qDebug() << "[OpenHbbTV] urlChanged" << u.toString();
+        if (m_teletextReturnInProgress && isTeletextUrl(u)) {
+            qDebug() << "[OpenHbbTV] block teletext reload during leading-zero return" << u.toString();
+            stop();
+            setUrl(QUrl(QStringLiteral("about:blank")));
+            loadInitialUrlAfterTeletextReturn(120);
+        }
+    });
     connect(this, &QWebEngineView::loadFinished, this, &WebView::loadFinished);
     connect(page(), &QWebEnginePage::renderProcessTerminated, this,
             [this](QWebEnginePage::RenderProcessTerminationStatus status, int exitCode) {
@@ -195,17 +203,75 @@ void WebView::setInitialUrl(const QUrl &url)
     qDebug() << "[OpenHbbTV] initial url stored" << m_initialUrl.toString();
 }
 
-bool WebView::isTeletextUrl() const
+bool WebView::isTeletextUrl(const QUrl &candidate) const
 {
-    const QUrl currentUrl = url();
-    const QString host = currentUrl.host().toLower();
-    const QString path = currentUrl.path().toLower();
-    const QString full = currentUrl.toString().toLower();
+    const QString host = candidate.host().toLower();
+    const QString path = candidate.path().toLower();
+    const QString full = candidate.toString().toLower();
 
     return host.startsWith(QStringLiteral("vtx.")) ||
            host.contains(QStringLiteral("videotext")) ||
            path.contains(QStringLiteral("videotext")) ||
            full.contains(QStringLiteral("vtx."));
+}
+
+bool WebView::isTeletextUrl() const
+{
+    return isTeletextUrl(url());
+}
+
+bool WebView::isInitialUrl(const QUrl &candidate) const
+{
+    if (!m_initialUrl.isValid() || m_initialUrl.isEmpty())
+        return false;
+
+    const QUrl normalizedCandidate = candidate.adjusted(QUrl::RemoveFragment);
+    const QUrl normalizedInitial = m_initialUrl.adjusted(QUrl::RemoveFragment);
+    return normalizedCandidate == normalizedInitial;
+}
+
+void WebView::loadInitialUrlAfterTeletextReturn(int delayMs)
+{
+    if (!m_initialUrl.isValid() || m_initialUrl.isEmpty()) {
+        qDebug() << "[OpenHbbTV] teletext return requested but initial url is empty";
+        m_teletextReturnInProgress = false;
+        return;
+    }
+
+    QTimer::singleShot(delayMs, this, [this]() {
+        if (!m_teletextReturnInProgress)
+            return;
+        qDebug() << "[OpenHbbTV] force teletext return url" << m_initialUrl.toString();
+        setUrl(m_initialUrl);
+    });
+}
+
+void WebView::beginTeletextReturn()
+{
+    if (!m_initialUrl.isValid() || m_initialUrl.isEmpty()) {
+        qDebug() << "[OpenHbbTV] teletext leading zero detected but initial url is empty";
+        return;
+    }
+
+    if (m_teletextReturnInProgress) {
+        qDebug() << "[OpenHbbTV] ignore repeated teletext leading zero during return";
+        return;
+    }
+
+    qDebug() << "[OpenHbbTV] teletext leading zero start guarded return to initial url" << m_initialUrl.toString();
+    m_teletextReturnInProgress = true;
+    m_teletextDigitBuffer.clear();
+    m_teletextDigitTimer->stop();
+    stop();
+    setUrl(QUrl(QStringLiteral("about:blank")));
+    loadInitialUrlAfterTeletextReturn(120);
+
+    QTimer::singleShot(3500, this, [this]() {
+        if (m_teletextReturnInProgress) {
+            qDebug() << "[OpenHbbTV] teletext leading-zero return guard timeout" << url().toString();
+            m_teletextReturnInProgress = false;
+        }
+    });
 }
 
 bool WebView::isTeletextDigitKey(int keyCode) const
@@ -232,10 +298,14 @@ bool WebView::handleTeletextDigit(int keyCode)
     // and reopen the broadcaster start application via Enigma2/eHbbTV.
     // Zeros in the second or third position remain normal page input, e.g.
     // 100, 101, 110.
+    if (m_teletextReturnInProgress) {
+        qDebug() << "[OpenHbbTV] ignore teletext digit during return" << digit;
+        return true;
+    }
+
     if (m_teletextDigitBuffer.isEmpty() && digit == QLatin1Char('0')) {
-        m_teletextDigitTimer->stop();
-        qDebug() << "[OpenHbbTV] teletext leading zero request start application";
-        openTeletextStartApplication();
+        qDebug() << "[OpenHbbTV] teletext leading zero detected";
+        beginTeletextReturn();
         return true;
     }
 
@@ -273,14 +343,6 @@ void WebView::flushTeletextDigitBuffer()
         if (ch.isDigit())
             injectKeyEvent(VirtualKey::VK_0 + ch.digitValue());
     }
-}
-
-void WebView::openTeletextStartApplication()
-{
-    // Reopen the broadcaster start application via Enigma2/eHbbTV instead
-    // of passing an invalid teletext page request back to the page.
-    qDebug() << "[OpenHbbTV] teletext request start application via E2";
-    emit hbbtvCommand(CommandClient::CommandCreateApplication, QStringLiteral("dvb://current.ait/13.1?autoshow=1"));
 }
 
 void WebView::sendKeyEvent(const int &keyCode)
@@ -409,6 +471,10 @@ void WebView::titleChanged(const QString &title)
 void WebView::loadFinished(bool ok)
 {
     qDebug() << "[OpenHbbTV] loadFinished" << ok << url().toString();
+    if (m_teletextReturnInProgress && ok && isInitialUrl(url())) {
+        qDebug() << "[OpenHbbTV] teletext leading-zero return completed" << url().toString();
+        m_teletextReturnInProgress = false;
+    }
     if (ok) {
         if (size().width() == 1920 && size().height() == 1080)
             page()->runJavaScript(QString::fromLatin1("document.body.style.setProperty('zoom', '150%');"));

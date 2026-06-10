@@ -44,13 +44,17 @@ protected Q_SLOTS:
 private:
     void dispatchHbbtvBridgeCommand(const QString &command);
     bool isTeletextUrl() const;
+    bool isTeletextUrl(const QUrl &candidate) const;
     bool isTeletextDigitKey(int keyCode) const;
     QChar teletextDigitFromKeyCode(int keyCode) const;
     bool handleTeletextDigit(int keyCode);
     void flushTeletextDigitBuffer();
-    void openTeletextStartApplication();
+    void beginTeletextReturn();
+    void loadInitialUrlAfterTeletextReturn(int delayMs);
+    bool isInitialUrl(const QUrl &candidate) const;
     void injectKeyEvent(int keyCode);
     QUrl m_initialUrl;
+    bool m_teletextReturnInProgress;
     QString m_teletextDigitBuffer;
     QTimer *m_teletextDigitTimer;
     QLabel *m_quitMsg;
