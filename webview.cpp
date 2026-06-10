@@ -8,6 +8,7 @@
 #include <QWebEngineScript>
 #include <QWebEngineScriptCollection>
 #include <QWebEngineHistory>
+#include <QWebEnginePage>
 #include <QFileInfo>
 
 WebView::WebView(QWidget *parent)
@@ -29,6 +30,10 @@ WebView::WebView(QWidget *parent)
     connect(this, &QWebEngineView::loadProgress, this, [this](int progress) { qDebug() << "[OpenHbbTV] loadProgress" << progress << url().toString(); });
     connect(this, &QWebEngineView::urlChanged, this, [this](const QUrl &u) { qDebug() << "[OpenHbbTV] urlChanged" << u.toString(); });
     connect(this, &QWebEngineView::loadFinished, this, &WebView::loadFinished);
+    connect(page(), &QWebEnginePage::renderProcessTerminated, this,
+            [this](QWebEnginePage::RenderProcessTerminationStatus status, int exitCode) {
+                qWarning() << "[OpenHbbTV] renderProcessTerminated" << status << exitCode << url().toString();
+            });
 }
 
 void WebView::injectHbbTVScripts(const QString &src)
