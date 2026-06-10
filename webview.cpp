@@ -199,11 +199,14 @@ void WebView::showApplicationOverlay(const QString &reason)
             top->showFullScreen();
             top->raise();
             top->activateWindow();
-            qDebug() << "[OpenHbbTV] show browser window for overlay" << reason;
+            qDebug() << "[OpenHbbTV] show browser window for overlay" << reason << top->geometry() << "visible" << top->isVisible();
         } else {
+            top->showFullScreen();
             top->raise();
             top->activateWindow();
+            qDebug() << "[OpenHbbTV] refresh visible browser window for overlay" << reason << top->geometry() << "visible" << top->isVisible();
         }
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
     }
     page()->runJavaScript(QString::fromLatin1(
         "(function() {"
@@ -239,16 +242,12 @@ void WebView::hideApplicationOverlay(const QString &reason)
             qDebug() << "[OpenHbbTV] save browser window geometry" << m_streamOverlaySavedGeometry;
         }
 
-        // On Vu+/libvupl, QWidget::hide() can leave the last EGL frame in the
-        // hardware overlay even though Qt reports visible=false. Move/resize
-        // the native window out of the video plane first, then hide/lower it.
-        // This gives the libvupl integration a real SetPosition update before
-        // the hide operation and prevents the stale browser frame from covering
-        // the E2/GStreamer video.
+        // With the qtbase/libvupl visibility update installed, do not move the
+        // native window off-screen anymore. Moving to 1x1/-4096 can survive a
+        // later show() on Vu/libvupl, so OK appears to do nothing although Qt
+        // reports visible=true. The correct path is now a plain QWidget::hide(),
+        // which qtbase must translate to VUGLES_SetVisible(false).
         top->lower();
-        top->setGeometry(-4096, -4096, 1, 1);
-        qDebug() << "[OpenHbbTV] move browser window offscreen for stream" << reason << top->geometry();
-        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
         if (top->isVisible()) {
             top->hide();
             qDebug() << "[OpenHbbTV] hide browser window for stream" << reason;
