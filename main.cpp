@@ -13,6 +13,7 @@
 #include <QWebEngineSettings>
 #include <QWebEngineProfile>
 #include <QList>
+#include <QScreen>
 
 #if defined(EMBEDDED_BUILD)
 #include <sys/stat.h>
@@ -161,6 +162,23 @@ int main(int argc, char *argv[])
     window->webView()->setInitialUrl(url);
     window->webView()->setUrl(url);
 #if defined(EMBEDDED_BUILD)
+    QSize embeddedWindowSize;
+    const QString vuplSize = QString::fromLocal8Bit(qgetenv("EGLFS_LIBVUPL_SIZE")).trimmed();
+    const QStringList vuplParts = vuplSize.split(QLatin1Char('x'));
+    if (vuplParts.size() == 2) {
+        bool okW = false;
+        bool okH = false;
+        const int w = vuplParts.at(0).toInt(&okW);
+        const int h = vuplParts.at(1).toInt(&okH);
+        if (okW && okH && w > 0 && h > 0)
+            embeddedWindowSize = QSize(w, h);
+    }
+    if (!embeddedWindowSize.isValid() && app.primaryScreen())
+        embeddedWindowSize = app.primaryScreen()->size();
+    if (embeddedWindowSize.isValid()) {
+        window->resize(embeddedWindowSize);
+        qDebug() << "[OpenHbbTV] resize embedded window" << embeddedWindowSize;
+    }
     qDebug() << "[OpenHbbTV] showFullScreen" << window->geometry();
     window->showFullScreen();
 #else
