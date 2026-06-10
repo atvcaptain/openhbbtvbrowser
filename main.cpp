@@ -4,6 +4,8 @@
 #include "hardwareprofile.h"
 #include "webview.h"
 #include <QApplication>
+#include <QByteArray>
+#include <QCursor>
 #include <QCommandLineParser>
 #include <QDir>
 #include <QLockFile>
@@ -51,6 +53,7 @@ QUrl commandLineUrlArgument()
 
 int main(int argc, char *argv[])
 {
+    qputenv("QT_QPA_EGLFS_HIDECURSOR", QByteArrayLiteral("1"));
     installOpenHbbTVDebugLogger();
     qDebug() << "[OpenHbbTV] process start argc" << argc;
 #if defined(EMBEDDED_BUILD)
@@ -82,6 +85,7 @@ int main(int argc, char *argv[])
     int qAppArgCount = qargv.size();
 
     QApplication app(qAppArgCount, qargv.data());
+    app.setOverrideCursor(QCursor(Qt::BlankCursor));
 
 #if defined(EMBEDDED_BUILD)
     QLockFile lockFile(QDir::tempPath() + "/openhbbtvbrowser.lock");

@@ -2,6 +2,7 @@
 #include "browsercontrol.h"
 #include "virtualkey.h"
 #include <QApplication>
+#include <QCursor>
 #include <QGuiApplication>
 #include <QScreen>
 #include <QUrl>
@@ -31,6 +32,9 @@ WebView::WebView(QWidget *parent)
     int y = (screenGeometry.height() - m_quitMsg->height()) / 2;
     m_quitMsg->setGeometry(x, y, 480, 120);
     m_quitMsg->hide();
+
+    setCursor(Qt::BlankCursor);
+    setMouseTracking(false);
 
     m_teletextDigitTimer->setSingleShot(true);
     m_teletextDigitTimer->setInterval(1200);
@@ -78,6 +82,22 @@ void WebView::injectHbbTVScripts(const QString &src)
         script.setRunsOnSubFrames(true);
         script.setWorldId(QWebEngineScript::MainWorld);
         page()->scripts().insert(script);
+
+        QWebEngineScript cursorScript;
+        cursorScript.setName("openhbbtv_hide_cursor");
+        cursorScript.setSourceCode(QString::fromLatin1(
+            "(function() {"
+            "  try {"
+            "    var style = document.createElement('style');"
+            "    style.id = 'openhbbtv-hide-cursor';"
+            "    style.textContent = '* { cursor: none !important; } html, body { cursor: none !important; }';"
+            "    (document.head || document.documentElement).appendChild(style);"
+            "  } catch (e) {}"
+            "})();"));
+        cursorScript.setInjectionPoint(QWebEngineScript::DocumentCreation);
+        cursorScript.setRunsOnSubFrames(true);
+        cursorScript.setWorldId(QWebEngineScript::MainWorld);
+        page()->scripts().insert(cursorScript);
 
         qDebug() << "[HbbTV] Injected polyfill from" << src;
     } else {
@@ -559,6 +579,8 @@ void WebView::dispatchHbbtvBridgeCommand(const QString &rawCommand)
     } else if (command.startsWith(QStringLiteral("SET_VIDEO_WINDOW:"))) {
         emit hbbtvCommand(CommandClient::CommandSetVideoWindow, command.mid(17));
     } else if (command.startsWith(QStringLiteral("PLAY_STREAM:"))) {
+        qDebug() << "[OpenHbbTV] local stream state playing after PLAY_STREAM";
+        setStreamState(1, -1);
         emit hbbtvCommand(CommandClient::CommandPlayStream, command.mid(12));
     } else if (command == QStringLiteral("STOP_STREAM")) {
         emit hbbtvCommand(CommandClient::CommandStopStream, QString());
@@ -609,6 +631,21 @@ void WebView::loadFinished(bool ok)
     if (ok) {
         if (size().width() == 1920 && size().height() == 1080)
             page()->runJavaScript(QString::fromLatin1("document.body.style.setProperty('zoom', '150%');"));
+
+        page()->runJavaScript(QString::fromLatin1(
+            "(function() {"
+            "  try { document.documentElement.style.setProperty('cursor', 'none', 'important'); } catch (e) {}"
+            "  try { document.body.style.setProperty('cursor', 'none', 'important'); } catch (e) {}"
+            "  try {"
+            "    var style = document.getElementById('openhbbtv-hide-cursor');"
+            "    if (!style) {"
+            "      style = document.createElement('style');"
+            "      style.id = 'openhbbtv-hide-cursor';"
+            "      style.textContent = '* { cursor: none !important; } html, body { cursor: none !important; }';"
+            "      (document.head || document.documentElement).appendChild(style);"
+            "    }"
+            "  } catch (e) {}"
+            "})();"));
 
         page()->runJavaScript(QString::fromLatin1("document.body.style.setProperty('overflow', 'hidden');"));
 

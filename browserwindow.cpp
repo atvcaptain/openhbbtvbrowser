@@ -3,6 +3,7 @@
 #include "webpage.h"
 #include "webview.h"
 #include <QCoreApplication>
+#include <QCursor>
 #include <QStringList>
 #include <QUrl>
 #include <QWebEngineProfile>
@@ -14,8 +15,10 @@ BrowserWindow::BrowserWindow(QWidget *parent, Qt::WindowFlags flags)
 {
     WebPage *page = new WebPage(QWebEngineProfile::defaultProfile(), m_webView);
     m_webView->setPage(page);
+    m_webView->setCursor(Qt::BlankCursor);
     m_webView->show();
 
+    setCursor(Qt::BlankCursor);
     setCentralWidget(m_webView);
 
     connect(m_webView, &WebView::hbbtvCommand, this, &BrowserWindow::sendHbbtvCommand);

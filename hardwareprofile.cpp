@@ -47,6 +47,7 @@ QString HardwareProfile::readHardwareText()
     const QStringList paths = QStringList()
             << QStringLiteral("/proc/stb/info/boxtype")
             << QStringLiteral("/proc/stb/info/model")
+            << QStringLiteral("/proc/stb/info/brand")
             << QStringLiteral("/proc/stb/info/vumodel")
             << QStringLiteral("/proc/stb/info/chipset")
             << QStringLiteral("/proc/device-tree/model")
@@ -67,6 +68,55 @@ QString HardwareProfile::modelSummary()
 {
     return readHardwareText();
 }
+
+QString HardwareProfile::readVuModel()
+{
+    return readFirstExistingFile(QStringList()
+            << QStringLiteral("/proc/stb/info/vumodel")).toLower();
+}
+
+bool HardwareProfile::isVuplBlockedModel(const QString &value)
+{
+    QString model = value.trimmed().toLower();
+    model.remove(QLatin1Char('\0'));
+
+    // Old/non-GLES boxes and some clone/fake profiles can expose a Vu-like
+    // vumodel. Do not force the Vu+ EGLFS/libvupl path for these names.
+    if (model == QStringLiteral("vulultimo") ||
+        model == QStringLiteral("vultimo") ||
+        model == QStringLiteral("vuultimo") ||
+        model == QStringLiteral("ultimo")) {
+        return true;
+    }
+
+    return false;
+}
+
+bool HardwareProfile::hasVuplRuntime()
+{
+    const bool hasLibVupl = QFileInfo::exists(QStringLiteral("/usr/lib/libvupl.so")) ||
+                            QFileInfo::exists(QStringLiteral("/lib/libvupl.so"));
+    const bool hasVuplIntegration = QFileInfo::exists(QStringLiteral("/usr/lib/plugins/egldeviceintegrations/libqeglfs-libvupl-integration.so")) ||
+                                    QFileInfo::exists(QStringLiteral("/usr/lib/qt5/plugins/egldeviceintegrations/libqeglfs-libvupl-integration.so")) ||
+                                    QFileInfo::exists(QStringLiteral("/usr/lib/qt/plugins/egldeviceintegrations/libqeglfs-libvupl-integration.so"));
+    return hasLibVupl && hasVuplIntegration;
+}
+
+bool HardwareProfile::shouldUseVupl()
+{
+    if (isTruthy(environmentValue("OPENHBBTV_DISABLE_VUPL")))
+        return false;
+
+    const QString vuModel = readVuModel();
+    if (isVuplBlockedModel(vuModel))
+        return false;
+
+    const QString hw = readHardwareText();
+    const bool hasVuIdentity = !vuModel.isEmpty() || hw.contains(QStringLiteral("vuplus")) ||
+                              hw.contains(QStringLiteral("vu+"));
+    return hasVuIdentity && hasVuplRuntime();
+}
+
 
 bool HardwareProfile::isTruthy(const QString &value)
 {
@@ -94,6 +144,13 @@ QString HardwareProfile::detectPlatform()
 
     const QString hw = readHardwareText();
 
+    // Vu+ boxes provide a dedicated Qt EGLFS device integration named
+    // eglfs_libvupl. Enable it only when the runtime pieces are really present.
+    // This avoids forcing Vu+ GLES on old/no-GLES boxes or clone/fake profiles
+    // that expose a Vu-like model string without libvupl support.
+    if (shouldUseVupl())
+        return QStringLiteral("eglfs_libvupl");
+
     const bool hasMaliDevice = QFileInfo::exists(QStringLiteral("/dev/mali")) ||
                                QFileInfo::exists(QStringLiteral("/dev/mali0")) ||
                                QFileInfo::exists(QStringLiteral("/sys/class/misc/mali")) ||
@@ -111,7 +168,7 @@ QString HardwareProfile::detectPlatform()
     // Keep that path auto-selectable for known framebuffer-only profiles, but
     // prefer eglfs for unknown hardware because Qt WebEngine normally needs EGL.
     if (hw.contains(QStringLiteral("linuxfb")) || hw.contains(QStringLiteral("noegl")) ||
-        hw.contains(QStringLiteral("dm800")) || hw.contains(QStringLiteral("dm500"))) {
+        hw.contains(QStringLiteral("dm500"))) {
         return QStringLiteral("linuxfb");
     }
 
@@ -147,12 +204,22 @@ void HardwareProfile::applyEnvironment(int argc, char *argv[])
         qputenv("QT_QPA_EGLFS_INTEGRATION", "eglfs_mali");
     }
 
+    if ((platform == QStringLiteral("eglfs_libvupl") || platform == QStringLiteral("libvupl") ||
+         platform == QStringLiteral("vupl") || platform == QStringLiteral("vuplus")) &&
+        qgetenv("QT_QPA_EGLFS_INTEGRATION").isNull()) {
+        qputenv("QT_QPA_EGLFS_INTEGRATION", "eglfs_libvupl");
+    }
+
     if (qgetenv("QT_QPA_EGLFS_HIDECURSOR").isNull())
         qputenv("QT_QPA_EGLFS_HIDECURSOR", "1");
+    if (qgetenv("QT_QPA_FB_HIDECURSOR").isNull())
+        qputenv("QT_QPA_FB_HIDECURSOR", "1");
 
     std::fprintf(stderr,
-                 "[OpenHbbTV] hardware='%s' platform='%s' QT_QPA_PLATFORM='%s' EGLFS_INTEGRATION='%s'\n",
+                 "[OpenHbbTV] hardware='%s' vumodel='%s' vupl_runtime=%d platform='%s' QT_QPA_PLATFORM='%s' EGLFS_INTEGRATION='%s'\n",
                  qPrintable(readHardwareText()),
+                 qPrintable(readVuModel()),
+                 hasVuplRuntime() ? 1 : 0,
                  qPrintable(platform),
                  qgetenv("QT_QPA_PLATFORM").constData(),
                  qgetenv("QT_QPA_EGLFS_INTEGRATION").constData());

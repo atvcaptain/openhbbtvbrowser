@@ -18,6 +18,10 @@ private:
     static QString environmentValue(const char *name);
     static QString readFirstExistingFile(const QStringList &paths);
     static QString readHardwareText();
+    static QString readVuModel();
+    static bool isVuplBlockedModel(const QString &value);
+    static bool hasVuplRuntime();
+    static bool shouldUseVupl();
     static QString detectPlatform();
     static QString detectRemoteDevice();
     static QStringList detectRemoteDevices();
