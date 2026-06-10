@@ -28,6 +28,7 @@ public:
     void setBroadcastInfo(const QString &json);
     void setStreamState(int state, int error);
     void showApplicationOverlay(const QString &reason = QString());
+    void hideApplicationOverlay(const QString &reason = QString());
     bool isStreamActive() const;
     void setInitialUrl(const QUrl &url);
     void setLanguage(const QString &language);

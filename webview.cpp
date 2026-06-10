@@ -11,6 +11,7 @@
 #include <QWebEnginePage>
 #include <QFileInfo>
 #include <QTimer>
+#include <QWidget>
 
 WebView::WebView(QWidget *parent)
     : QWebEngineView(parent)
@@ -160,6 +161,13 @@ void WebView::setBroadcastInfo(const QString &json)
 void WebView::showApplicationOverlay(const QString &reason)
 {
     qDebug() << "[OpenHbbTV] show application overlay" << reason;
+    QWidget *top = window();
+    if (top && !top->isVisible()) {
+        top->showFullScreen();
+        top->raise();
+        top->activateWindow();
+        qDebug() << "[OpenHbbTV] show browser window for overlay" << reason;
+    }
     page()->runJavaScript(QString::fromLatin1(
         "(function() {"
         "  try { if (document.documentElement) document.documentElement.style.visibility = 'visible'; } catch (e) {}"
@@ -172,6 +180,18 @@ void WebView::showApplicationOverlay(const QString &reason)
         "  } catch (e) {}"
         "  try { window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('focus')); } catch (e) {}"
         "})();"));
+}
+
+void WebView::hideApplicationOverlay(const QString &reason)
+{
+    if (!isStreamActive())
+        return;
+    qDebug() << "[OpenHbbTV] hide application overlay" << reason;
+    QWidget *top = window();
+    if (top && top->isVisible()) {
+        top->hide();
+        qDebug() << "[OpenHbbTV] hide browser window for stream" << reason;
+    }
 }
 
 void WebView::refreshApplicationAfterTeletextReturn()
@@ -213,7 +233,11 @@ void WebView::setStreamState(int state, int error)
                                     "  }"
                                     "})();").arg(state).arg(error);
     page()->runJavaScript(s);
-    if (state == 0) {
+    if (state == 1) {
+        QTimer::singleShot(900, this, [this]() { hideApplicationOverlay(QStringLiteral("stream state playing auto hide")); });
+    } else if (state == 2) {
+        showApplicationOverlay(QStringLiteral("stream state paused"));
+    } else if (state == 0) {
         showApplicationOverlay(QStringLiteral("stream state stopped"));
         QTimer::singleShot(150, this, [this]() { showApplicationOverlay(QStringLiteral("stream state stopped retry 1")); });
         QTimer::singleShot(650, this, [this]() { showApplicationOverlay(QStringLiteral("stream state stopped retry 2")); });
