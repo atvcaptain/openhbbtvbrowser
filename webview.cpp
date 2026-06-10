@@ -208,12 +208,14 @@ void WebView::sendKeyEvent(const int &keyCode)
     qDebug() << "[OpenHbbTV] sendKeyEvent" << keyCode;
 
     if (keyCode == VirtualKey::VK_0 && isTeletextUrl()) {
-        if (m_initialUrl.isValid() && !m_initialUrl.isEmpty()) {
-            qDebug() << "[OpenHbbTV] teletext key 0 return to initial url" << m_initialUrl.toString();
-            setUrl(m_initialUrl);
-            return;
-        }
-        qDebug() << "[OpenHbbTV] teletext key 0 detected but initial url is empty";
+        // ARD Videotext uses key 0 as "Startleiste". Do not inject the
+        // numeric key into the teletext page here: some teletext pages treat
+        // it as page number input (000) and immediately reload the VTX app.
+        // Route the request through the HbbTV backend instead, so Enigma2
+        // resolves the AIT application locator and reopens the Red Button app.
+        qDebug() << "[OpenHbbTV] teletext key 0 request start application via E2";
+        emit hbbtvCommand(CommandClient::CommandCreateApplication, QStringLiteral("dvb://current.ait/13.1?autoshow=1"));
+        return;
     }
 
     if (keyCode == VirtualKey::VK_BACK) {
