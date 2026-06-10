@@ -31033,9 +31033,41 @@ class OipfVideoBroadcastMapper {
                 writable: false
             }
         });
-        oipfPluginObject.programmes = [];
-        oipfPluginObject.programmes.push({ name: 'Event 1, umlaut \u00e4', channelId: 'ccid:dvbt.0', duration: 600, startTime: Date.now() / 1000, description: 'EIT present event is under construction' });
-        oipfPluginObject.programmes.push({ name: 'Event 2, umlaut \u00f6', channelId: 'ccid:dvbt.0', duration: 300, startTime: Date.now() / 1000 + 600, description: 'EIT following event is under construction' });
+        function normaliseProgramme(programme) {
+            programme = programme || {};
+            var channelId = programme.channelId || (window.HBBTV_POLYFILL_NS.currentChannel && window.HBBTV_POLYFILL_NS.currentChannel.ccid) || 'ccid:dvbt.0';
+            return {
+                name: programme.name || '',
+                channelId: channelId,
+                duration: Number(programme.duration || 0),
+                startTime: Number(programme.startTime || 0),
+                description: programme.description || '',
+                longDescription: programme.longDescription || programme.description || ''
+            };
+        }
+        function getBroadcastProgrammes() {
+            var programmes = window.HBBTV_POLYFILL_NS.broadcastProgrammes || [];
+            return programmes.map(normaliseProgramme).filter(function(programme) {
+                return programme.name || programme.duration > 0 || programme.startTime > 0;
+            });
+        }
+        oipfPluginObject.programmes = getBroadcastProgrammes();
+        window.HBBTV_POLYFILL_NS.applyBroadcastInfo = function(info) {
+            info = info || {};
+            if (info.channel) {
+                window.HBBTV_POLYFILL_NS.currentChannel = info.channel;
+                currentChannel = info.channel;
+                oipfPluginObject.currentChannel = currentChannel;
+            }
+            window.HBBTV_POLYFILL_NS.broadcastProgrammes = info.programmes || window.HBBTV_POLYFILL_NS.broadcastProgrammes || [];
+            oipfPluginObject.programmes = getBroadcastProgrammes();
+            try {
+                var event = document.createEvent('Event');
+                event.initEvent('ProgrammesChanged', false, false);
+                oipfPluginObject.dispatchEvent(event);
+            } catch (e) {
+            }
+        };
         Object.defineProperty(oipfPluginObject, 'COMPONENT_TYPE_VIDEO', { value: 0, enumerable: true });
         Object.defineProperty(oipfPluginObject, 'COMPONENT_TYPE_AUDIO', { value: 1, enumerable: true });
         Object.defineProperty(oipfPluginObject, 'COMPONENT_TYPE_SUBTITLE', { value: 2, enumerable: true });

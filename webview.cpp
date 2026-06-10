@@ -111,6 +111,32 @@ void WebView::setCurrentChannel(const int &onid, const int &tsid, const int &sid
     page()->runJavaScript(s);
 }
 
+void WebView::setBroadcastInfo(const QString &json)
+{
+    qDebug() << "[OpenHbbTV] setBroadcastInfo" << json.left(240);
+    const QByteArray encoded = json.toUtf8().toBase64();
+    QString s = QString::fromLatin1(
+        "(function() {"
+        "  window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};"
+        "  var raw = '';"
+        "  try { raw = decodeURIComponent(escape(atob('%1'))); } catch (e) { raw = '{}'; }"
+        "  try {"
+        "    var info = JSON.parse(raw);"
+        "    window.HBBTV_POLYFILL_NS.broadcastInfo = info;"
+        "    if (info.channel) {"
+        "      window.HBBTV_POLYFILL_NS.currentChannel = info.channel;"
+        "    }"
+        "    window.HBBTV_POLYFILL_NS.broadcastProgrammes = info.programmes || [];"
+        "    if (typeof window.HBBTV_POLYFILL_NS.applyBroadcastInfo === 'function') {"
+        "      window.HBBTV_POLYFILL_NS.applyBroadcastInfo(info);"
+        "    }"
+        "  } catch (e) {"
+        "    console.log('OpenHbbTV setBroadcastInfo failed', e);"
+        "  }"
+        "})();").arg(QString::fromLatin1(encoded));
+    page()->runJavaScript(s);
+}
+
 void WebView::setStreamState(int state, int error)
 {
     qDebug() << "[OpenHbbTV] setStreamState" << state << error;

@@ -68,6 +68,9 @@ void BrowserWindow::onBackendCommand(int command, const QString &data)
             m_webView->setCurrentChannel(parts.at(0).toInt(), parts.at(1).toInt(), parts.at(2).toInt());
         break;
     }
+    case CommandClient::CommandSetBroadcastInfo:
+        m_webView->setBroadcastInfo(data);
+        break;
     case CommandClient::CommandSetStreamState: {
         QStringList parts = data.split(QLatin1Char(','));
         int state = parts.value(0).toInt();
