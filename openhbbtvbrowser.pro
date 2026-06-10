@@ -4,7 +4,7 @@ QT += webenginewidgets
 CONFIG += c++1z
 CONFIG += console
 
-cross_compile: DEFINES += EMBEDDED_BUILD
+DEFINES += EMBEDDED_BUILD
 
 HEADERS += \
     virtualkey.h \
