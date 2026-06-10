@@ -118,6 +118,7 @@ public:
         CommandPrevChannel = 16,
         CommandNextChannel = 17,
         CommandLog = 18,
+        CommandRestartApplication = 19,
 
         CommandOpenUrl = 101,
         CommandSetCurrentChannel = 102,
