@@ -2,6 +2,8 @@
 #include "browserwindow.h"
 #include "virtualkey.h"
 #include <QKeyEvent>
+#include <QDataStream>
+#include <QIODevice>
 
 #if defined(EMBEDDED_BUILD)
 
@@ -11,8 +13,9 @@
 #include <linux/dvb/version.h>
 #include <linux/dvb/audio.h>
 
-RemoteController::RemoteController(const QString &device)
+RemoteController::RemoteController(const QString &device, bool filterNavigationKeys)
     : m_muteToggle(false)
+    , m_filterNavigationKeys(filterNavigationKeys)
 {
     m_fd = ::open(device.toLocal8Bit().constData(), O_RDONLY, 0);
     if (m_fd >= 0) {
@@ -68,11 +71,11 @@ void RemoteController::readKeycode()
             case KEY_GREEN:         vk = VirtualKey::VK_GREEN; break;
             case KEY_YELLOW:        vk = VirtualKey::VK_YELLOW; break;
             case KEY_BLUE:          vk = VirtualKey::VK_BLUE; break;
-            case KEY_LEFT:          vk = VirtualKey::VK_LEFT; break;
-            case KEY_UP:            vk = VirtualKey::VK_UP; break;
-            case KEY_RIGHT:         vk = VirtualKey::VK_RIGHT; break;
-            case KEY_DOWN:          vk = VirtualKey::VK_DOWN; break;
-            case KEY_OK:            vk = VirtualKey::VK_ENTER; break;
+            case KEY_LEFT:          if (!m_filterNavigationKeys) vk = VirtualKey::VK_LEFT; break;
+            case KEY_UP:            if (!m_filterNavigationKeys) vk = VirtualKey::VK_UP; break;
+            case KEY_RIGHT:         if (!m_filterNavigationKeys) vk = VirtualKey::VK_RIGHT; break;
+            case KEY_DOWN:          if (!m_filterNavigationKeys) vk = VirtualKey::VK_DOWN; break;
+            case KEY_OK:            if (!m_filterNavigationKeys) vk = VirtualKey::VK_ENTER; break;
             case KEY_EXIT:          vk = VirtualKey::VK_BACK; break;
             case KEY_0:             vk = VirtualKey::VK_0; break;
             case KEY_1:             vk = VirtualKey::VK_1; break;
@@ -200,6 +203,7 @@ CommandClient::CommandClient(const QString &sockFile)
     : m_socket(new QLocalSocket(this))
 {
     connect(m_socket, &QLocalSocket::readyRead, this, &CommandClient::readCommand);
+    connect(m_socket, &QLocalSocket::disconnected, this, [this]() { m_rxBuffer.clear(); });
 
     m_socket->abort();
     m_socket->connectToServer(sockFile);
@@ -207,50 +211,68 @@ CommandClient::CommandClient(const QString &sockFile)
 
 void CommandClient::readCommand()
 {
-    while (!m_socket->atEnd()) {
-        if (m_socket->bytesAvailable() < 12)
+    m_rxBuffer.append(m_socket->readAll());
+
+    while (m_rxBuffer.size() >= 12) {
+        QByteArray header = m_rxBuffer.left(12);
+        QDataStream inStream(header);
+        inStream.setByteOrder(QDataStream::BigEndian);
+
+        quint32 magic = 0;
+        quint32 command = 0;
+        quint32 dataSize = 0;
+        inStream >> magic >> command >> dataSize;
+
+        if (magic != 987654321) {
+            qWarning() << "Invalid command magic" << magic;
+            m_rxBuffer.clear();
+            return;
+        }
+
+        if (dataSize > 1024 * 1024) {
+            qWarning() << "Invalid command payload size" << dataSize;
+            m_rxBuffer.clear();
+            return;
+        }
+
+        if (m_rxBuffer.size() < 12 + static_cast<int>(dataSize))
             return;
 
-        quint32 magic, command, dataSize;
+        QByteArray payload = m_rxBuffer.mid(12, dataSize);
+        m_rxBuffer.remove(0, 12 + dataSize);
 
-        QDataStream inStream(m_socket->read(12));
-        inStream >> magic
-                 >> command
-                 >> dataSize;
-
-        if (magic != 987654321)
-            continue;
-
-        char buf[dataSize + 1];
-        if (dataSize)
-            m_socket->read(buf, dataSize);
-        buf[dataSize] = 0;
-
-        qDebug() << "command" << command;
+        QString data = QString::fromUtf8(payload);
+        qDebug() << "command received" << command << data;
+        emit commandReceived(static_cast<int>(command), data);
     }
 }
 
 bool CommandClient::writeCommand(int command)
 {
-    if (!m_socket->isValid())
-        return false;
-
-    QDataStream outStream(m_socket);
-    outStream << (qint32)987654321
-              << (qint32)command
-              << (qint32)0;
-    return m_socket->waitForConnected(1000);
+    return writeCommand(command, QString());
 }
 
 bool CommandClient::writeCommand(int command, const QString &data)
 {
-    if (!m_socket->isValid())
+    if (m_socket->state() == QLocalSocket::UnconnectedState)
+        m_socket->connectToServer(m_socket->serverName());
+
+    if (!m_socket->waitForConnected(1000) && !m_socket->isValid())
         return false;
 
-    QDataStream outStream(m_socket);
-    outStream << (qint32)987654321
-              << (qint32)command
-              << (qint32)data.size();
-    m_socket->write(data.toStdString().c_str(), data.size());
-    return m_socket->waitForConnected(1000);
+    QByteArray payload = data.toUtf8();
+
+    QByteArray header;
+    QDataStream outStream(&header, QIODevice::WriteOnly);
+    outStream.setByteOrder(QDataStream::BigEndian);
+    outStream << static_cast<quint32>(987654321)
+              << static_cast<quint32>(command)
+              << static_cast<quint32>(payload.size());
+
+    if (m_socket->write(header) != header.size())
+        return false;
+    if (!payload.isEmpty() && m_socket->write(payload) != payload.size())
+        return false;
+
+    return m_socket->waitForBytesWritten(1000);
 }

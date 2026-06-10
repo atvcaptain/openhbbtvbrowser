@@ -29941,94 +29941,65 @@ class OipfAVControlMapper {
         this.avControlObject = node;
         this.isDashVideo = isDashVideo;
 
-        const originalDataAttribute = this.avControlObject.data;
-        // let video playback fail. Modern browsers don't support any handling of media events and methods on <object type="" data=""> tags
-        // setting data to unknown url will cause a GET 40x.. found no better solution yet to disable playback
-        this.avControlObject.data = "http://google.com/400";
-        this.videoElement = document.createElement('video'); // setup artificial video tag
-        this.videoElement.setAttribute('id', 'hbbtv-polyfill-video-player');
-        this.videoElement.setAttribute('autoplay', ''); // setting src will start the video and send an event
-        this.videoElement.setAttribute('style', 'top:0px; left:0px; width:100%; height:100%;');
-
-        // interval to simulate rewind functionality
-        this.rewindInterval;
-
-        this.dashPlayer;
-        // user dash.js to init player
-        if (this.isDashVideo) {
-            this.dashPlayer = Object(dashjs__WEBPACK_IMPORTED_MODULE_0__["MediaPlayer"])().create();
-            this.dashPlayer.initialize(this.videoElement, originalDataAttribute, true);
-        } else {
-            this.videoElement.src = originalDataAttribute; // copy object data url to html5 video tag src attribute ...
-        }
+        this.originalDataAttribute = this.avControlObject.data || "";
+        this.avControlObject.data = "about:blank";
+        this.avControlObject.style.background = "transparent";
+        this.avControlObject.playState = PLAY_STATES.stopped;
+        this.avControlObject.playPosition = 0;
+        this.avControlObject.playTime = 0;
+        this.avControlObject.speed = 0;
+        this.avControlObject.error = -1;
 
         this.mapAvControlToHtml5Video();
         this.watchAvControlObjectMutations(this.avControlObject);
-        this.registerEmbeddedVideoPlayerEvents(this.avControlObject, this.videoElement);
-        this.avControlObject.appendChild(this.videoElement);
-        this.avControlObject.playTime = this.videoElement.duration * 1000;
-        // ANSI CTA-2014-B - 5.7.1.f - 5
-        this.avControlObject.error = -1;
     }
 
     mapAvControlToHtml5Video() {
-        clearInterval(this.rewindInterval);
-        // ANSI CTA-2014-B
-        // 5.7.1.f
-        this.avControlObject.play = (speed) => { // number 
+        const send = (command) => {
+            if (window.signalopenhbbtvbrowser) {
+                window.signalopenhbbtvbrowser(command);
+            }
+        };
+        const dispatchPlayState = (state) => {
+            this.avControlObject.playState = state;
+            var playerEvent = new Event('PlayStateChange');
+            playerEvent.state = state;
+            if (this.avControlObject.onPlayStateChange) {
+                this.avControlObject.onPlayStateChange(state);
+            }
+            this.avControlObject.dispatchEvent(playerEvent);
+        };
+
+        this.avControlObject.play = (speed) => {
             if (speed === 0) {
-                setTimeout(() => {
-                    this.videoElement.pause();
-                    this.avControlObject.speed = 0;
-                }, 0);
-            }
-            else if (speed > 0) {
-                // delay play as some code may made some initializations beforehand in same event loop
-                setTimeout(() => {
-                    this.avControlObject.speed = speed;
-                    this.videoElement.playbackRate = speed;
-                    this.videoElement.play().catch((e) => {
-                        console.error(e.message);
-                        this.avControlObject.error = 5;
-                        //  this.videoElement.dispatchEvent(new Event('error'));
-                    });
-                }, 0);
-            }
-            else if (speed < 0) {
+                this.avControlObject.speed = 0;
+                send("PAUSE_STREAM");
+                dispatchPlayState(PLAY_STATES.paused);
+            } else if (speed > 0) {
                 this.avControlObject.speed = speed;
-                this.videoElement.playbackRate = 1.0;
-                this.videoElement.play().catch((e) => {
-                    console.error(e.message);
-                    this.avControlObject.error = 5;
-                    //  this.videoElement.dispatchEvent(new Event('error'));
-                });
-                this.rewindInterval = setInterval(() => {
-                    if (this.videoElement.currentTime < 0.1) {
-                        this.videoElement.currentTime = 0;
-                        this.videoElement.pause();
-                        this.avControlObject.speed = 0;
-                        clearInterval(this.rewindInterval);
-                    } else {
-                        this.videoElement.currentTime = this.videoElement.currentTime -= 0.1;
-                    }
-                }, 100);
+                send("PLAY_STREAM:" + this.originalDataAttribute);
+                dispatchPlayState(PLAY_STATES.connecting);
+            } else if (speed < 0) {
+                this.avControlObject.speed = speed;
+                send("PLAY_STREAM:" + this.originalDataAttribute);
+                dispatchPlayState(PLAY_STATES.connecting);
             }
             return true;
         };
         this.avControlObject.stop = () => {
-            this.videoElement.pause();
-            this.videoElement.currentTime = 0;
-            this.avControlObject.playState = 0;
+            send("STOP_STREAM");
             this.avControlObject.playPosition = 0;
             this.avControlObject.speed = 0;
+            dispatchPlayState(PLAY_STATES.stopped);
             return true;
         };
         this.avControlObject.seek = (posInMs) => {
-            // need seconds HTMLMediaElement.currentTime
-            this.videoElement.currentTime = posInMs / 1000;
             this.avControlObject.playPosition = posInMs;
+            send("SEEK_STREAM:" + posInMs);
+            var playerEvent = new Event('PlayPositionChanged');
+            playerEvent.position = posInMs;
+            this.avControlObject.dispatchEvent(playerEvent);
             return true;
-
         };
     }
     watchAvControlObjectMutations(avControlObject) {
@@ -30036,12 +30007,9 @@ class OipfAVControlMapper {
         // if url of control object changed - change url of video object
         const handleDataChanged = (event) => { // MutationRecord
             if (event.attributeName === "data") {
-                if (this.avControlObject.data.search("http://google.com/400") < 0) { // prevent infinite data change loop
-                    this.videoElement.src = this.avControlObject.data;
-                    // let video playback fail. Modern browsers don't support any handling of media events and methods on <object type="" data=""> tags
-                    // setting data to unknown url will cause a GET 40x.. found no better soluttion yet to disable playback
-                    this.avControlObject.data = "http://google.com/400";
-                    this.videoElement.load();
+                if (this.avControlObject.data && this.avControlObject.data !== "about:blank") {
+                    this.originalDataAttribute = this.avControlObject.data;
+                    this.avControlObject.data = "about:blank";
                 }
             }
         };
@@ -30276,7 +30244,6 @@ class VideoHandler {
 
         if (mimeType.lastIndexOf('video/broadcast', 0) === 0) {
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BROADCAST VIDEO PLAYER ...');
-            window.signalopenhbbtvbrowser("OipfVideoBroadcastEmbeddedObject");
             this.videoBroadcastEmbeddedObject = new _video_broadcast_embedded_object__WEBPACK_IMPORTED_MODULE_0__["OipfVideoBroadcastMapper"](node);
         }
         if (mimeType.lastIndexOf('video/mpeg4', 0) === 0 ||
@@ -30284,13 +30251,11 @@ class VideoHandler {
             mimeType.lastIndexOf('audio/mp4', 0) === 0 ||  // aac audio
             mimeType.lastIndexOf('audio/mpeg', 0) === 0) { // mp3 audio
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BROADBAND VIDEO PLAYER ...');
-            window.signalopenhbbtvbrowser("OipfAVControlObject:" + node.data);
             new _a_v_control_embedded_object__WEBPACK_IMPORTED_MODULE_1__["OipfAVControlMapper"](node);
         }
         // setup mpeg dash player
         if(mimeType.lastIndexOf('application/dash+xml', 0) === 0){
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: DASH VIDEO PLAYER ...');
-            window.signalopenhbbtvbrowser("OipfAVControlObject:" + node.data);
             new _a_v_control_embedded_object__WEBPACK_IMPORTED_MODULE_1__["OipfAVControlMapper"](node, true);
         }
     }
@@ -30558,7 +30523,7 @@ const hbbtvFn = function () {
 
         window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: createApplication: ' + uri + " -> " + newLocation);
 
-        window.signalopenhbbtvbrowser("createApplication:" + newLocation);
+        window.signalopenhbbtvbrowser("CREATE_APPLICATION:" + newLocation);
     };
 
     Application.prototype.destroyApplication = function () {
@@ -30702,8 +30667,10 @@ __webpack_require__.r(__webpack_exports__);
 function init() {
     window.HBBTV_POLYFILL_DEBUG && console.log("hbbtv-polyfill: load");
 
+    window.__openatvHbbtvCommandSeq = 0;
     window.signalopenhbbtvbrowser = function(command) {
-        document.title = command;
+        window.__openatvHbbtvCommandSeq += 1;
+        document.title = "OPENATV_HBBTV:" + command + "||" + window.__openatvHbbtvCommandSeq;
     }
 
     // intercept XMLHttpRequest
@@ -30867,63 +30834,122 @@ class OipfVideoBroadcastMapper {
         this.injectBroadcastVideoMethods(this.oipfPluginObject);
     }
     injectBroadcastVideoMethods(oipfPluginObject) {
-        var isVideoPlayerAlreadyAdded = oipfPluginObject.children.length > 0;
-        if (!isVideoPlayerAlreadyAdded) {
-            this.videoTag = document.createElement('video');
-            this.videoTag.setAttribute('id', 'hbbtv-polyfill-video-player');
-            this.videoTag.setAttribute('autoplay', ''); // note: call to bindToCurrentChannel() or play() is doing it
-            this.videoTag.setAttribute('loop', '');
-            this.videoTag.setAttribute('style', 'top:0px; left:0px; width:100%; height:100%;');
-            this.videoTag.src = "";
-            oipfPluginObject.appendChild(this.videoTag);
-            oipfPluginObject.playState = 2;
-            window.HBBTV_POLYFILL_DEBUG &&  console.info('hbbtv-polyfill: BROADCAST VIDEO PLAYER ... ADDED');
-        }
+        const send = (command) => {
+            if (window.signalopenhbbtvbrowser) {
+                window.signalopenhbbtvbrowser(command);
+            }
+        };
+        const dispatchPlayState = (state) => {
+            oipfPluginObject.playState = state;
+            var playerEvent = new Event('PlayStateChange');
+            playerEvent.state = state;
+            if (oipfPluginObject.onPlayStateChange) {
+                oipfPluginObject.onPlayStateChange(state);
+            }
+            oipfPluginObject.dispatchEvent(playerEvent);
+        };
+        const isVisible = () => {
+            var rect = oipfPluginObject.getBoundingClientRect();
+            var style = window.getComputedStyle(oipfPluginObject);
+            return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+        };
+        let lastRect = '';
+        let lastVisible = undefined;
+        const reportVideoWindow = () => {
+            if (!document.body || !oipfPluginObject.isConnected) {
+                return;
+            }
+            if (!isVisible()) {
+                if (lastVisible !== false) {
+                    send("BROADCAST_HIDDEN");
+                    send("UNSET_VIDEO_WINDOW");
+                    lastVisible = false;
+                    lastRect = '';
+                }
+                return;
+            }
+            var rect = oipfPluginObject.getBoundingClientRect();
+            var payload = [
+                Math.round(rect.left),
+                Math.round(rect.top),
+                Math.round(rect.width),
+                Math.round(rect.height),
+                window.innerWidth || document.documentElement.clientWidth || 1280,
+                window.innerHeight || document.documentElement.clientHeight || 720
+            ].join(',');
+            if (payload !== lastRect || lastVisible !== true) {
+                send("SET_VIDEO_WINDOW:" + payload);
+                lastRect = payload;
+                lastVisible = true;
+            }
+        };
+        const startVideoWindowObserver = () => {
+            var mutationObserver = new MutationObserver(reportVideoWindow);
+            mutationObserver.observe(document.documentElement || document.body, {
+                attributes: true,
+                childList: true,
+                subtree: true,
+                attributeFilter: ['style', 'class', 'width', 'height']
+            });
+            window.addEventListener('resize', reportVideoWindow, false);
+            window.addEventListener('scroll', reportVideoWindow, false);
+            setInterval(reportVideoWindow, 750);
+            setTimeout(reportVideoWindow, 0);
+            setTimeout(reportVideoWindow, 250);
+            setTimeout(reportVideoWindow, 1000);
+        };
 
-        // inject OIPF methods ...
+        oipfPluginObject.style.background = 'transparent';
+        oipfPluginObject.playState = 0;
 
-        //injectBroadcastVideoMethods(oipfPluginObject);
         var currentChannel = window.HBBTV_POLYFILL_NS.currentChannel;
         oipfPluginObject.currentChannel = currentChannel;
         oipfPluginObject.createChannelObject = function () {
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo createChannelObject() ...');
+            return currentChannel;
         };
         oipfPluginObject.bindToCurrentChannel = function () {
-            window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo bindToCurrentChannel() ...');
-            var player = document.getElementById('hbbtv-polyfill-video-player');
-            if (player) {
-                player.onerror = function (e) {
-                    window.HBBTV_POLYFILL_DEBUG && console.log("hbbtv-polyfill:", e);
-                };
-                window.HBBTV_POLYFILL_DEBUG && console.log("hbbtv-polyfill: now play");
-                player.play().catch((e) => {
-                    window.HBBTV_POLYFILL_DEBUG && console.log("hbbtv-polyfill:", e, e.message, player.src);
-                });
-                oipfPluginObject.playState = 2;
-                // TODO: If there is no channel currently being presented, the OITF SHALL dispatch an event to the onPlayStateChange listener(s) whereby the state parameter is given value 0 (“ unrealized ")
-            }
-            return; // TODO: must return a Channel object
+            window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo bindToCurrentChannel() via Enigma2 ...');
+            reportVideoWindow();
+            send("BROADCAST_PLAY");
+            dispatchPlayState(2);
+            return currentChannel;
         };
 
-        oipfPluginObject.setChannel = function () {
+        oipfPluginObject.setChannel = function (channel) {
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo setChannel() ...');
+            if (channel) {
+                currentChannel = channel;
+                oipfPluginObject.currentChannel = channel;
+                send("SET_CHANNEL:" + JSON.stringify({ onid: channel.onid, tsid: channel.tsid, sid: channel.sid, ccid: channel.ccid || '' }));
+            }
+            reportVideoWindow();
+            return true;
         };
         oipfPluginObject.prevChannel = function () {
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo prevChannel() ...');
+            send("PREV_CHANNEL");
             return currentChannel;
         };
         oipfPluginObject.nextChannel = function () {
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo nextChannel() ...');
+            send("NEXT_CHANNEL");
             return currentChannel;
         };
-        oipfPluginObject.release = function () {
-            window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo release() ...2');
-            var player = document.getElementById('hbbtv-polyfill-video-player');
-            if (player) {
-                player.pause();
-                player.parentNode.removeChild(player);
-            }
+        oipfPluginObject.stop = function () {
+            window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo stop() ...');
+            send("BROADCAST_STOP");
+            send("UNSET_VIDEO_WINDOW");
+            dispatchPlayState(0);
+            return true;
         };
+        oipfPluginObject.release = function () {
+            window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo release() ...');
+            send("BROADCAST_STOP");
+            send("UNSET_VIDEO_WINDOW");
+            dispatchPlayState(0);
+        };
+        startVideoWindowObserver();
         function ChannelConfig() {
         }
         ChannelConfig.prototype.channelList = {};
@@ -31041,9 +31067,15 @@ class OipfVideoBroadcastMapper {
         oipfPluginObject.unselectComponent = (function (cpt) { return true; }).bind(oipfPluginObject);
         oipfPluginObject.setFullScreen = (function (state) {
             this.onFullScreenChange(state);
-            var player = this.children.length > 0 ? this.children[0] : undefined;
-            if (player && state) {
-                player.style.width = '100%'; player.style.height = '100%';
+            if (state) {
+                this.style.position = 'fixed';
+                this.style.left = '0px';
+                this.style.top = '0px';
+                this.style.width = '100vw';
+                this.style.height = '100vh';
+            }
+            if (window.signalopenhbbtvbrowser) {
+                window.signalopenhbbtvbrowser(state ? "BROADCAST_PLAY" : "BROADCAST_HIDDEN");
             }
         }).bind(oipfPluginObject);
         oipfPluginObject.onFullScreenChange = function () {

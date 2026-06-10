@@ -15,8 +15,8 @@ public:
     WebView *webView();
 
 protected Q_SLOTS:
-    void broadcastPlay();
-    void broadcastStop();
+    void sendHbbtvCommand(int command, const QString &data);
+    void onBackendCommand(int command, const QString &data);
 
 private:
     CommandClient *m_commandClient;

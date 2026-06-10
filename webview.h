@@ -5,7 +5,6 @@
 #include <QLabel>
 #include <QWebEngineUrlRequestInterceptor>
 
-//LOG all requests
 class RequestLogger : public QWebEngineUrlRequestInterceptor {
 public:
     void interceptRequest(QWebEngineUrlRequestInfo &info) override {
@@ -28,8 +27,7 @@ public:
     void setScriptDebugging(const QString &scriptDebugging);
 
 Q_SIGNALS:
-    void broadcastPlay();
-    void broadcastStop();
+    void hbbtvCommand(int command, const QString &data);
 
 public Q_SLOTS:
     void sendKeyEvent(const int &keyCode);
@@ -39,6 +37,7 @@ protected Q_SLOTS:
     void loadFinished(bool ok);
 
 private:
+    void dispatchHbbtvBridgeCommand(const QString &command);
     QLabel *m_quitMsg;
     int m_quitMsgStatus;
 };

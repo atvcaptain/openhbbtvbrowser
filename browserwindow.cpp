@@ -2,6 +2,9 @@
 #include "browserwindow.h"
 #include "webpage.h"
 #include "webview.h"
+#include <QCoreApplication>
+#include <QStringList>
+#include <QUrl>
 #include <QWebEngineProfile>
 
 BrowserWindow::BrowserWindow(QWidget *parent, Qt::WindowFlags flags)
@@ -15,8 +18,8 @@ BrowserWindow::BrowserWindow(QWidget *parent, Qt::WindowFlags flags)
 
     setCentralWidget(m_webView);
 
-    connect(m_webView, &WebView::broadcastPlay, this, &BrowserWindow::broadcastPlay);
-    connect(m_webView, &WebView::broadcastStop, this, &BrowserWindow::broadcastStop);
+    connect(m_webView, &WebView::hbbtvCommand, this, &BrowserWindow::sendHbbtvCommand);
+    connect(m_commandClient, &CommandClient::commandReceived, this, &BrowserWindow::onBackendCommand);
 }
 
 WebView *BrowserWindow::webView()
@@ -24,12 +27,29 @@ WebView *BrowserWindow::webView()
     return m_webView;
 }
 
-void BrowserWindow::broadcastPlay()
+void BrowserWindow::sendHbbtvCommand(int command, const QString &data)
 {
-    m_commandClient->writeCommand(CommandClient::CommandBroadcastPlay);
+    m_commandClient->writeCommand(command, data);
 }
 
-void BrowserWindow::broadcastStop()
+void BrowserWindow::onBackendCommand(int command, const QString &data)
 {
-    m_commandClient->writeCommand(CommandClient::CommandBroadcastStop);
+    switch (command) {
+    case CommandClient::CommandOpenUrl:
+        if (!data.isEmpty())
+            m_webView->setUrl(QUrl::fromUserInput(data));
+        break;
+    case CommandClient::CommandSetCurrentChannel: {
+        QStringList parts = data.split(QLatin1Char(','));
+        if (parts.size() >= 3)
+            m_webView->setCurrentChannel(parts.at(0).toInt(), parts.at(1).toInt(), parts.at(2).toInt());
+        break;
+    }
+    case CommandClient::CommandQuit:
+        QCoreApplication::quit();
+        break;
+    default:
+        qDebug() << "Unhandled backend command" << command << data;
+        break;
+    }
 }

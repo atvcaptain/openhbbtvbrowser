@@ -1,5 +1,6 @@
 #include "browsercontrol.h"
 #include "browserwindow.h"
+#include "hardwareprofile.h"
 #include "webview.h"
 #include <QApplication>
 #include <QCommandLineParser>
@@ -49,15 +50,10 @@ QUrl commandLineUrlArgument()
 int main(int argc, char *argv[])
 {
 #if defined(EMBEDDED_BUILD)
+    HardwareProfile::applyEnvironment(argc, argv);
+
     if (mkdir_mount_devshm())
         return 1;
-
-    if (qgetenv("QT_QPA_FONTDIR").isNull())
-        qputenv("QT_QPA_FONTDIR", "/usr/share/fonts");
-    if (qgetenv("QT_QPA_PLATFORM").isNull())
-        qputenv("QT_QPA_PLATFORM", "eglfs");
-    if (qgetenv("QT_QPA_EGLFS_HIDECURSOR").isNull())
-        qputenv("QT_QPA_EGLFS_HIDECURSOR", "1");
 #endif
 
     QCoreApplication::setOrganizationName(QLatin1String("Qt"));
@@ -115,6 +111,9 @@ int main(int argc, char *argv[])
     parser.addOption(QCommandLineOption("sid", "Service ID", "sid"));
     parser.addOption(QCommandLineOption("enable-script-debugging", "EnableScript Debugging"));
     parser.addOption(QCommandLineOption("enable-netlog", "Enable HTTP request logging"));
+    parser.addOption(QCommandLineOption("openhbbtv-platform", "Runtime platform backend: auto, eglfs, eglfs_mali or linuxfb", "platform"));
+    parser.addOption(QCommandLineOption("openhbbtv-remote-device", "Remote input device path or auto", "device"));
+    parser.addOption(QCommandLineOption("openhbbtv-remote-navigation-keys", "Forward navigation/OK keys from direct evdev reader: auto, on or off", "mode"));
     parser.addHelpOption();
     parser.addVersionOption();
     parser.parse(QCoreApplication::arguments());
@@ -137,7 +136,6 @@ int main(int argc, char *argv[])
 
     auto window = new BrowserWindow();
 #if defined(EMBEDDED_BUILD)
-    window->showFullScreen();
     window->setWindowFlags(Qt::FramelessWindowHint);
     window->setAttribute(Qt::WA_TranslucentBackground);
     window->setStyleSheet("background: transparent;");
@@ -151,10 +149,18 @@ int main(int argc, char *argv[])
     window->webView()->setLanguage(QStringLiteral("DEU")); // TODO:
     window->webView()->setScriptDebugging(scriptDebugging ? QStringLiteral("true") : QStringLiteral("false"));
     window->webView()->setUrl(url);
+#if defined(EMBEDDED_BUILD)
+    window->showFullScreen();
+#else
     window->show();
+#endif
 
 #if defined(EMBEDDED_BUILD)
-    auto remote = new RemoteController();
+    const QString remoteDevice = HardwareProfile::remoteDevice(argc, argv);
+    const bool filterNavigationKeys = HardwareProfile::filterRemoteNavigationKeys(argc, argv);
+    qDebug() << "[OpenHbbTV] remote device" << remoteDevice
+             << "direct-navigation-keys" << (!filterNavigationKeys);
+    auto remote = new RemoteController(remoteDevice, filterNavigationKeys);
     QObject::connect(remote, &RemoteController::activate, window->webView(), &WebView::sendKeyEvent);
 #else
     auto filter = new WindowEventFilter();

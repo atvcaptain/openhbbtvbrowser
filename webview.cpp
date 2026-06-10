@@ -1,4 +1,5 @@
 #include "webview.h"
+#include "browsercontrol.h"
 #include "virtualkey.h"
 #include <QApplication>
 #include <QGuiApplication>
@@ -88,6 +89,7 @@ void WebView::setCurrentChannel(const int &onid, const int &tsid, const int &sid
                                     "    onid : %1,"
                                     "    tsid : %2,"
                                     "    sid  : %3,"
+                                    "    ccid : 'ccid:dvbt.%1.%2.%3'"
                                     "  };"
                                     "})();").arg(onid).arg(tsid).arg(sid);
 
@@ -97,6 +99,7 @@ void WebView::setCurrentChannel(const int &onid, const int &tsid, const int &sid
     script.setRunsOnSubFrames(true);
     script.setWorldId(QWebEngineScript::MainWorld);
     page()->scripts().insert(script);
+    page()->runJavaScript(s);
 }
 
 void WebView::setLanguage(const QString &language)
@@ -176,19 +179,58 @@ void WebView::sendKeyEvent(const int &keyCode)
     page()->runJavaScript(s);
 }
 
+void WebView::dispatchHbbtvBridgeCommand(const QString &rawCommand)
+{
+    QString command = rawCommand;
+    const int seqPos = command.lastIndexOf(QStringLiteral("||"));
+    if (seqPos >= 0)
+        command.truncate(seqPos);
+
+    if (command == QStringLiteral("BROADCAST_PLAY")) {
+        emit hbbtvCommand(CommandClient::CommandBroadcastPlay, QString());
+    } else if (command == QStringLiteral("BROADCAST_STOP")) {
+        emit hbbtvCommand(CommandClient::CommandBroadcastStop, QString());
+    } else if (command == QStringLiteral("BROADCAST_HIDDEN")) {
+        emit hbbtvCommand(CommandClient::CommandBroadcastHidden, QString());
+    } else if (command == QStringLiteral("UNSET_VIDEO_WINDOW")) {
+        emit hbbtvCommand(CommandClient::CommandUnsetVideoWindow, QString());
+    } else if (command.startsWith(QStringLiteral("SET_VIDEO_WINDOW:"))) {
+        emit hbbtvCommand(CommandClient::CommandSetVideoWindow, command.mid(17));
+    } else if (command.startsWith(QStringLiteral("PLAY_STREAM:"))) {
+        emit hbbtvCommand(CommandClient::CommandPlayStream, command.mid(12));
+    } else if (command == QStringLiteral("STOP_STREAM")) {
+        emit hbbtvCommand(CommandClient::CommandStopStream, QString());
+    } else if (command == QStringLiteral("PAUSE_STREAM")) {
+        emit hbbtvCommand(CommandClient::CommandPauseStream, QString());
+    } else if (command.startsWith(QStringLiteral("SEEK_STREAM:"))) {
+        emit hbbtvCommand(CommandClient::CommandSeekStream, command.mid(12));
+    } else if (command.startsWith(QStringLiteral("CREATE_APPLICATION:"))) {
+        emit hbbtvCommand(CommandClient::CommandCreateApplication, command.mid(19));
+    } else if (command == QStringLiteral("RESTORE_BROADCAST")) {
+        emit hbbtvCommand(CommandClient::CommandRestoreBroadcast, QString());
+    } else if (command.startsWith(QStringLiteral("SET_CHANNEL:"))) {
+        emit hbbtvCommand(CommandClient::CommandSetChannel, command.mid(12));
+    } else if (command == QStringLiteral("PREV_CHANNEL")) {
+        emit hbbtvCommand(CommandClient::CommandPrevChannel, QString());
+    } else if (command == QStringLiteral("NEXT_CHANNEL")) {
+        emit hbbtvCommand(CommandClient::CommandNextChannel, QString());
+    } else if (command.startsWith(QStringLiteral("LOG:"))) {
+        emit hbbtvCommand(CommandClient::CommandLog, command.mid(4));
+    } else {
+        qDebug() << "Unhandled HbbTV bridge command" << command;
+    }
+}
+
 void WebView::titleChanged(const QString &title)
 {
-    if (title.startsWith("OipfVideoBroadcastEmbeddedObject")) {
-        emit broadcastPlay();
-    } else if (title.startsWith("OipfAVControlObject")) {
-        emit broadcastStop();
-
-        QString url = title.mid(20);
-        qDebug() << url;
-    } else if (title.startsWith("createApplication")) {
-        QString url = title.mid(18);
-        qDebug() << url;
-        setUrl(QUrl(url));
+    if (title.startsWith(QStringLiteral("OPENATV_HBBTV:"))) {
+        dispatchHbbtvBridgeCommand(title.mid(14));
+    } else if (title.startsWith(QStringLiteral("OipfVideoBroadcastEmbeddedObject"))) {
+        // Legacy polyfill signal. The new video/broadcast mapper sends exact state commands.
+    } else if (title.startsWith(QStringLiteral("OipfAVControlObject:"))) {
+        // Legacy polyfill signal. Playback starts only after PLAY_STREAM from the mapper.
+    } else if (title.startsWith(QStringLiteral("createApplication:"))) {
+        emit hbbtvCommand(CommandClient::CommandCreateApplication, title.mid(18));
     }
 }
 
@@ -204,5 +246,6 @@ void WebView::loadFinished(bool ok)
         page()->runJavaScript(QString::fromLatin1("if (document.getElementById('oipfcfg')) document.getElementById('oipfcfg').style.setProperty('visibility', 'hidden');"));
         page()->runJavaScript(QString::fromLatin1("if (document.getElementById('oipfCap')) document.getElementById('oipfCap').style.setProperty('visibility', 'hidden');"));
         page()->runJavaScript(QString::fromLatin1("if (document.getElementById('oipfDrm')) document.getElementById('oipfDrm').style.setProperty('visibility', 'hidden');"));
+        emit hbbtvCommand(CommandClient::CommandPageLoadFinished, url().toString());
     }
 }
