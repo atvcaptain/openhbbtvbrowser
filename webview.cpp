@@ -275,25 +275,37 @@ void WebView::loadInitialUrlAfterTeletextReturn(int delayMs)
 
 void WebView::beginTeletextReturn()
 {
+    if (!m_initialUrl.isValid() || m_initialUrl.isEmpty()) {
+        qDebug() << "[OpenHbbTV] teletext leading zero detected but initial url is empty";
+        return;
+    }
+
     if (m_teletextReturnInProgress) {
         qDebug() << "[OpenHbbTV] ignore repeated teletext leading zero during return";
         return;
     }
 
-    qDebug() << "[OpenHbbTV] teletext leading zero request fresh red-button restart" << m_initialUrl.toString();
+    qDebug() << "[OpenHbbTV] teletext leading zero start guarded return via E2 start application" << m_initialUrl.toString();
     m_teletextReturnInProgress = true;
     m_teletextDigitBuffer.clear();
     m_teletextDigitTimer->stop();
 
-    // Do not forward the leading zero to the teletext application. A local URL
-    // reload leaves stale ARD/VTX JavaScript state behind, so ask the Enigma2
-    // backend to stop the current browser process and start a fresh Red Button
-    // application instance through the normal eHbbTV activation path.
-    emit hbbtvCommand(CommandClient::CommandRestartApplication, QStringLiteral("redbutton"));
+    // Do not forward the leading zero to the teletext page. Stop the current
+    // vtx page first, then let Enigma2/eHbbtv reopen the broadcaster start
+    // application. This preserves AIT/app parameters better than a pure local
+    // setUrl(m_initialUrl) reload.
+    stop();
+    setUrl(QUrl(QStringLiteral("about:blank")));
+    emit hbbtvCommand(CommandClient::CommandCreateApplication, QStringLiteral("dvb://current.ait/13.1?autoshow=1"));
 
-    QTimer::singleShot(2500, this, [this]() {
+    // Fallback only. If E2 answers with OPEN_URL, BrowserWindow will load it
+    // before this fires. Keeping the fallback avoids a permanent blank page if
+    // the backend cannot resolve the locator.
+    loadInitialUrlAfterTeletextReturn(900);
+
+    QTimer::singleShot(4500, this, [this]() {
         if (m_teletextReturnInProgress) {
-            qDebug() << "[OpenHbbTV] teletext fresh restart still pending" << url().toString();
+            qDebug() << "[OpenHbbTV] teletext leading-zero return guard timeout" << url().toString();
             m_teletextReturnInProgress = false;
         }
     });
@@ -405,32 +417,42 @@ void WebView::injectKeyEvent(int keyCode)
     QMetaEnum metaEnum = QMetaEnum::fromType<VirtualKey::VirtualKeyType>();
 
     QString s = QString::fromLatin1("(function() {"
+                                    "  var code = %1;"
+                                    "  var vkName = '%2';"
+                                    "  var resolved = (typeof window[vkName] !== 'undefined') ? window[vkName] : code;"
                                     "  var target = document.activeElement || document.body || document.documentElement || document;"
+                                    "  try { if (document.body && document.body.focus) document.body.focus(); } catch (ignore) {}"
+                                    "  function keyName(value) {"
+                                    "    if (value >= 48 && value <= 57) return String.fromCharCode(value);"
+                                    "    if (value === 13) return 'Enter';"
+                                    "    if (value === 37 || value === 403) return 'ArrowLeft';"
+                                    "    if (value === 38 || value === 404) return 'ArrowUp';"
+                                    "    if (value === 39 || value === 405) return 'ArrowRight';"
+                                    "    if (value === 40 || value === 406) return 'ArrowDown';"
+                                    "    if (value === 461) return 'Backspace';"
+                                    "    return vkName || String(value);"
+                                    "  }"
                                     "  function makeEvent(type) {"
                                     "    var e = new KeyboardEvent(type, {"
                                     "      bubbles : true,"
                                     "      cancelable : true,"
-                                    "      keyCode : %1,"
-                                    "      which : %1"
+                                    "      composed : true,"
+                                    "      key : keyName(resolved),"
+                                    "      code : vkName,"
+                                    "      keyCode : resolved,"
+                                    "      which : resolved"
                                     "    });"
-                                    "    if (window['%2'] !== 'undefined') {"
-                                    "      try { delete e.keyCode; } catch (ignore) {}"
-                                    "      try { delete e.which; } catch (ignore) {}"
-                                    "      Object.defineProperty(e, 'keyCode', { value: window['%2'] });"
-                                    "      Object.defineProperty(e, 'which', { value: window['%2'] });"
-                                    "    }"
+                                    "    try { Object.defineProperty(e, 'keyCode', { value: resolved }); } catch (ignore) {}"
+                                    "    try { Object.defineProperty(e, 'which', { value: resolved }); } catch (ignore) {}"
+                                    "    try { Object.defineProperty(e, 'charCode', { value: 0 }); } catch (ignore) {}"
                                     "    return e;"
                                     "  }"
-                                    "  target.dispatchEvent(makeEvent('keydown'));"
-                                    "  if (%1 == 13) {"
-                                    "    var mouseEvent = new MouseEvent('click', {"
-                                    "      bubbles : true,"
-                                    "      cancelable : true"
-                                    "    });"
-                                    "    target.dispatchEvent(mouseEvent);"
-                                    "  }"
+                                    "  try { target.dispatchEvent(makeEvent('keydown')); } catch (e) { console.log('OpenHbbTV keydown failed', e); }"
+                                    "  window.setTimeout(function() {"
+                                    "    try { target.dispatchEvent(makeEvent('keyup')); } catch (e) { console.log('OpenHbbTV keyup failed', e); }"
+                                    "  }, 25);"
                                     "})();").arg(keyCode).arg(metaEnum.valueToKey(keyCode));
-    qDebug() << "[OpenHbbTV] inject key" << keyCode;
+    qDebug() << "[OpenHbbTV] inject keydown+keyup" << keyCode;
     page()->runJavaScript(s);
 }
 
