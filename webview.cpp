@@ -257,7 +257,15 @@ void WebView::setStreamState(int state, int error)
                                     "})();").arg(state).arg(error);
     page()->runJavaScript(s);
     if (state == 1) {
-        QTimer::singleShot(900, this, [this]() { hideApplicationOverlay(QStringLiteral("stream state playing auto hide")); });
+        // When external E2 playback starts the browser must get out of the
+        // video plane immediately. Especially on Vu+/libvupl the full-screen
+        // EGL surface can otherwise cover the GStreamer video: audio is heard
+        // but the HbbTV page remains visible and the user can accidentally
+        // start a second stream. Keep several retries because some HbbTV apps
+        // call Application.show around PLAY_STREAM.
+        QTimer::singleShot(80, this, [this]() { hideApplicationOverlay(QStringLiteral("stream state playing auto hide 1")); });
+        QTimer::singleShot(250, this, [this]() { hideApplicationOverlay(QStringLiteral("stream state playing auto hide 2")); });
+        QTimer::singleShot(700, this, [this]() { hideApplicationOverlay(QStringLiteral("stream state playing auto hide 3")); });
     } else if (state == 2) {
         showApplicationOverlay(QStringLiteral("stream state paused"));
     } else if (state == 0) {
@@ -622,6 +630,10 @@ void WebView::dispatchHbbtvBridgeCommand(const QString &rawCommand)
     } else if (command.startsWith(QStringLiteral("PLAY_STREAM:"))) {
         qDebug() << "[OpenHbbTV] local stream state playing after PLAY_STREAM";
         setStreamState(1, -1);
+        // Do not wait for the backend state echo. Hide the browser surface as
+        // soon as the page requests external playback so the video can become
+        // visible before the app has a chance to process more navigation keys.
+        QTimer::singleShot(20, this, [this]() { hideApplicationOverlay(QStringLiteral("PLAY_STREAM immediate hide")); });
         emit hbbtvCommand(CommandClient::CommandPlayStream, command.mid(12));
     } else if (command == QStringLiteral("STOP_STREAM")) {
         emit hbbtvCommand(CommandClient::CommandStopStream, QString());
