@@ -57,7 +57,7 @@ int main(int argc, char *argv[])
     qputenv("QT_QPA_EGLFS_HIDECURSOR", QByteArrayLiteral("1"));
     installOpenHbbTVDebugLogger();
     qDebug() << "[OpenHbbTV] process start argc" << argc;
-    qDebug() << "[OpenHbbTV] process build id e2-rcu-owner-html5-vod-e2-20260611";
+    qDebug() << "[OpenHbbTV] process build id e2-rcu-owner-vod-block-qt-20260611";
     qDebug() << "[OpenHbbTV] build mode e2-rcu-owner-stream-overlay-window";
 #if defined(EMBEDDED_BUILD)
     HardwareProfile::applyEnvironment(argc, argv);
@@ -224,10 +224,8 @@ int main(int argc, char *argv[])
     QObject::connect(filter, &WindowEventFilter::activate, window->webView(), &WebView::sendKeyEvent);
 #endif
 
-    if (enableNetlog) {
-        qDebug() << "[NET] RequestLogger enabled";
-        window->webView()->page()->profile()->setUrlRequestInterceptor(new RequestLogger());
-    }
+    qDebug() << "[OpenHbbTV] native Qt media request blocker enabled" << "netlog" << enableNetlog;
+    window->webView()->page()->profile()->setUrlRequestInterceptor(new OpenHbbTVRequestInterceptor(enableNetlog, window->webView()->page()->profile()));
 
     int result = app.exec();
     qDebug() << "[OpenHbbTV] process exit" << result;

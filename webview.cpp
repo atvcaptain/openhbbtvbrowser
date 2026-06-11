@@ -328,7 +328,10 @@ void WebView::hideApplicationOverlay(const QString &reason)
         }
 
         const QString hideMode = QString::fromLocal8Bit(qgetenv("OPENHBBTV_STREAM_BROWSER_HIDE_MODE")).trimmed().toLower();
-        const bool nativeHide = hideMode == QStringLiteral("hide")
+        const bool reasonNativeHide = reason.toLower().contains(QStringLiteral("vod-native-hide"))
+            || reason.toLower().contains(QStringLiteral("native-hide"));
+        const bool nativeHide = reasonNativeHide
+            || hideMode == QStringLiteral("hide")
             || hideMode == QStringLiteral("native")
             || hideMode == QStringLiteral("hidden")
             || hideMode == QStringLiteral("1")

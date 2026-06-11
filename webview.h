@@ -8,13 +8,47 @@
 #include <QTimer>
 #include <QRect>
 
-class RequestLogger : public QWebEngineUrlRequestInterceptor {
+class OpenHbbTVRequestInterceptor : public QWebEngineUrlRequestInterceptor {
 public:
-    void interceptRequest(QWebEngineUrlRequestInfo &info) override {
-        qDebug().noquote() << "[NET] Request:"
-                           << info.requestMethod()
-                           << info.requestUrl().toString();
+    explicit OpenHbbTVRequestInterceptor(bool logRequests = false, QObject *parent = Q_NULLPTR)
+        : QWebEngineUrlRequestInterceptor(parent)
+        , m_logRequests(logRequests)
+    {
     }
+
+    void interceptRequest(QWebEngineUrlRequestInfo &info) override {
+        const QUrl requestUrl = info.requestUrl();
+        const QString path = requestUrl.path().toLower();
+        const QString url = requestUrl.toString(QUrl::FullyEncoded);
+        const QWebEngineUrlRequestInfo::ResourceType type = info.resourceType();
+        const bool mediaExtension = path.endsWith(QStringLiteral(".mp4")) ||
+                                    path.endsWith(QStringLiteral(".m4v")) ||
+                                    path.endsWith(QStringLiteral(".mov")) ||
+                                    path.endsWith(QStringLiteral(".webm")) ||
+                                    path.endsWith(QStringLiteral(".m3u8")) ||
+                                    path.endsWith(QStringLiteral(".mpd"));
+        const bool nativeMediaRequest = type == QWebEngineUrlRequestInfo::ResourceTypeMedia ||
+                                        type == QWebEngineUrlRequestInfo::ResourceTypeObject;
+
+        if (nativeMediaRequest && mediaExtension) {
+            qWarning().noquote() << "[OpenHbbTV] blocked native Qt media request"
+                                 << info.requestMethod()
+                                 << type
+                                 << url;
+            info.block(true);
+            return;
+        }
+
+        if (m_logRequests) {
+            qDebug().noquote() << "[NET] Request:"
+                               << info.requestMethod()
+                               << type
+                               << url;
+        }
+    }
+
+private:
+    bool m_logRequests;
 };
 
 class WebView : public QWebEngineView

@@ -29941,7 +29941,8 @@ class OipfAVControlMapper {
         this.avControlObject = node;
         this.isDashVideo = isDashVideo;
 
-        this.originalDataAttribute = this.avControlObject.data || "";
+        this.originalDataAttribute = this.avControlObject.__openhbbtvOriginalDataAttribute || this.avControlObject.data || this.avControlObject.getAttribute('data') || "";
+        this.avControlObject.__openhbbtvOriginalDataAttribute = this.originalDataAttribute;
         this.avControlObject.data = "about:blank";
         this.avControlObject.style.background = "transparent";
         this.avControlObject.playState = PLAY_STATES.stopped;
@@ -30051,7 +30052,35 @@ class OipfAVControlMapper {
             send("LOG:AVControl#" + this.avControlId + " " + message + " state=" + this.avControlObject.playState + " speed=" + this.avControlObject.speed + " active=" + describeElement(document.activeElement) + " lastKey=" + lastKeySummary());
         };
 
+        const blockNativeAvSurface = (reason) => {
+            try {
+                this.avControlObject.data = 'about:blank';
+            } catch (ignoreData) {
+            }
+            try {
+                this.avControlObject.setAttribute('data', 'about:blank');
+            } catch (ignoreAttr) {
+            }
+            try {
+                this.avControlObject.style.background = 'transparent';
+                this.avControlObject.style.opacity = '0';
+                this.avControlObject.style.visibility = 'hidden';
+                this.avControlObject.style.pointerEvents = 'none';
+                this.avControlObject.style.width = '1px';
+                this.avControlObject.style.height = '1px';
+                this.avControlObject.style.position = 'absolute';
+                this.avControlObject.style.left = '-8192px';
+                this.avControlObject.style.top = '-8192px';
+            } catch (ignoreStyle) {
+            }
+            try {
+                send("LOG:AVControl#" + this.avControlId + " native AV surface blocked reason=" + reason);
+            } catch (ignoreLog) {
+            }
+        };
+
         trace("constructor dash=" + !!this.isDashVideo + " originalData=" + (this.originalDataAttribute || ""));
+        blockNativeAvSurface('constructor');
 
         const dispatchPlayState = (state, reason) => {
             this.avControlObject.playState = state;
@@ -30084,12 +30113,14 @@ class OipfAVControlMapper {
         // Only a real AVControl.play(speed) call may start an external E2 stream.
 
         const updateOriginalDataAttribute = () => {
-            const currentData = this.avControlObject.data || this.avControlObject.getAttribute('data') || '';
+            const guardedData = this.avControlObject.__openhbbtvOriginalDataAttribute || '';
+            const currentData = guardedData || this.avControlObject.data || this.avControlObject.getAttribute('data') || '';
             if (currentData && currentData !== 'about:blank') {
                 this.originalDataAttribute = currentData;
+                this.avControlObject.__openhbbtvOriginalDataAttribute = currentData;
                 this.avControlObject.data = 'about:blank';
             }
-            return this.originalDataAttribute || '';
+            return this.originalDataAttribute || this.avControlObject.__openhbbtvOriginalDataAttribute || '';
         };
 
         this.avControlObject.play = (speed) => {
@@ -30105,6 +30136,8 @@ class OipfAVControlMapper {
                     send("LOG:AVControl.play ignored without data");
                     return false;
                 }
+                blockNativeAvSurface('play(' + speed + ')');
+                blockNativeAvSurface('play(' + speed + ')');
                 trace("play(" + speed + ") -> PLAY_STREAM url=" + streamUrl);
                 markPlayStreamSent(streamUrl, "play speed " + speed);
                 send("PLAY_STREAM:" + streamUrl);
@@ -30145,7 +30178,7 @@ class OipfAVControlMapper {
         // if url of control object changed - change url of video object
         const handleDataChanged = (event) => { // MutationRecord
             if (event.attributeName === "data") {
-                const currentData = this.avControlObject.data || this.avControlObject.getAttribute('data') || '';
+                const currentData = this.avControlObject.__openhbbtvOriginalDataAttribute || this.avControlObject.data || this.avControlObject.getAttribute('data') || '';
                 if (currentData && currentData !== "about:blank") {
                     const changed = this.originalDataAttribute !== currentData;
                     this.originalDataAttribute = currentData;
@@ -31403,6 +31436,33 @@ class OipfVideoBroadcastMapper {
         return clean.lastIndexOf('.mpd') === clean.length - 4 || clean.lastIndexOf('.m3u8') === clean.length - 5;
     }
 
+    function isProgressiveMediaUrl(url) {
+        url = absoluteUrl(url);
+        if (!url || url.indexOf('blob:') === 0 || url.indexOf('data:') === 0 || url === 'about:blank') {
+            return false;
+        }
+        var clean = url.split('#')[0].split('?')[0].toLowerCase();
+        return clean.lastIndexOf('.mp4') === clean.length - 4 ||
+            clean.lastIndexOf('.m4v') === clean.length - 4 ||
+            clean.lastIndexOf('.mov') === clean.length - 4 ||
+            clean.lastIndexOf('.webm') === clean.length - 5;
+    }
+
+    function isRoutableMediaUrl(url) {
+        return isManifestUrl(url) || isProgressiveMediaUrl(url);
+    }
+
+    function isOipfMediaType(type) {
+        type = String(type || '').toLowerCase();
+        return type.indexOf('video/mp4') === 0 ||
+            type.indexOf('video/mpeg4') === 0 ||
+            type.indexOf('audio/mp4') === 0 ||
+            type.indexOf('audio/mpeg') === 0 ||
+            type.indexOf('application/dash+xml') === 0 ||
+            type.indexOf('application/vnd.apple.mpegurl') === 0 ||
+            type.indexOf('application/x-mpegurl') === 0;
+    }
+
     function looksLikeDrmManifest(text) {
         if (!text) {
             return false;
@@ -31433,13 +31493,13 @@ class OipfVideoBroadcastMapper {
                 return '';
             }
             var direct = video.currentSrc || video.src || video.getAttribute && video.getAttribute('src') || '';
-            if (isManifestUrl(direct)) {
+            if (isRoutableMediaUrl(direct)) {
                 return absoluteUrl(direct);
             }
             var sources = video.querySelectorAll ? video.querySelectorAll('source[src]') : [];
             for (var i = 0; i < sources.length; i++) {
                 var sourceUrl = sources[i].src || sources[i].getAttribute('src') || '';
-                if (isManifestUrl(sourceUrl)) {
+                if (isRoutableMediaUrl(sourceUrl)) {
                     return absoluteUrl(sourceUrl);
                 }
             }
@@ -31496,10 +31556,10 @@ class OipfVideoBroadcastMapper {
 
     function routeManifestToE2(url, reason, video, manifestText) {
         url = absoluteUrl(url);
-        if (!isManifestUrl(url)) {
+        if (!isRoutableMediaUrl(url)) {
             return false;
         }
-        if (looksLikeDrmManifest(manifestText)) {
+        if (isManifestUrl(url) && looksLikeDrmManifest(manifestText)) {
             log('manifest has DRM markers, keep Qt path url=' + url + ' reason=' + reason);
             return false;
         }
@@ -31542,6 +31602,54 @@ class OipfVideoBroadcastMapper {
             return ns.html5VodLastManifestUrl;
         }
         return '';
+    }
+
+    function installNativeMediaGuard() {
+        if (ns.html5VodNativeGuardInstalled) {
+            return;
+        }
+        ns.html5VodNativeGuardInstalled = true;
+
+        function rememberObjectMedia(objectElement, url, reason) {
+            try {
+                url = absoluteUrl(url || '');
+                if (!url || !isRoutableMediaUrl(url)) {
+                    return false;
+                }
+                objectElement.__openhbbtvOriginalDataAttribute = url;
+                log('object native media guarded reason=' + reason + ' type=' + (objectElement.type || objectElement.getAttribute && objectElement.getAttribute('type') || '') + ' url=' + url);
+                return true;
+            } catch (error) {
+                log('object native media guard failed reason=' + reason + ' error=' + error);
+                return false;
+            }
+        }
+
+        try {
+            var objectProto = window.HTMLObjectElement && window.HTMLObjectElement.prototype;
+            if (objectProto) {
+                var dataDescriptor = Object.getOwnPropertyDescriptor(objectProto, 'data');
+                if (dataDescriptor && dataDescriptor.set && dataDescriptor.get) {
+                    Object.defineProperty(objectProto, 'data', {
+                        enumerable: dataDescriptor.enumerable,
+                        configurable: true,
+                        get: function () {
+                            return this.__openhbbtvOriginalDataAttribute || dataDescriptor.get.call(this);
+                        },
+                        set: function (value) {
+                            var type = this.type || this.getAttribute && this.getAttribute('type') || '';
+                            if (isOipfMediaType(type) && rememberObjectMedia(this, value, 'object.data setter')) {
+                                return dataDescriptor.set.call(this, 'about:blank');
+                            }
+                            return dataDescriptor.set.call(this, value);
+                        }
+                    });
+                    log('object.data native guard installed');
+                }
+            }
+        } catch (error) {
+            log('object.data native guard install failed error=' + error);
+        }
     }
 
     function installFetchInterceptor() {
@@ -31662,7 +31770,7 @@ class OipfVideoBroadcastMapper {
                     },
                     set: function (value) {
                         var url = absoluteUrl(value || '');
-                        if (this.tagName && String(this.tagName).toLowerCase() === 'video' && isManifestUrl(url)) {
+                        if (this.tagName && String(this.tagName).toLowerCase() === 'video' && isRoutableMediaUrl(url)) {
                             log('video.src set manifest=' + url);
                             if (pageLooksLikeVodPlayback()) {
                                 routeManifestToE2(url, 'video.src', this);
@@ -31681,11 +31789,29 @@ class OipfVideoBroadcastMapper {
             window.Element.prototype.setAttribute = function (name, value) {
                 try {
                     var tag = this.tagName ? String(this.tagName).toLowerCase() : '';
-                    if (String(name).toLowerCase() === 'src' && (tag === 'video' || tag === 'source')) {
+                    var attr = String(name).toLowerCase();
+                    if (tag === 'object' && attr === 'data') {
+                        var objectType = this.type || this.getAttribute && this.getAttribute('type') || '';
+                        var objectUrl = absoluteUrl(value || '');
+                        if (isOipfMediaType(objectType) && isRoutableMediaUrl(objectUrl)) {
+                            this.__openhbbtvOriginalDataAttribute = objectUrl;
+                            log('object.setAttribute data guarded type=' + objectType + ' url=' + objectUrl);
+                            value = 'about:blank';
+                        }
+                    }
+                    if (tag === 'object' && attr === 'type') {
+                        var currentData = this.__openhbbtvOriginalDataAttribute || this.data || this.getAttribute && this.getAttribute('data') || '';
+                        if (isOipfMediaType(value) && isRoutableMediaUrl(currentData)) {
+                            this.__openhbbtvOriginalDataAttribute = absoluteUrl(currentData);
+                            nativeSetAttribute.call(this, 'data', 'about:blank');
+                            log('object.setAttribute type guarded type=' + value + ' url=' + this.__openhbbtvOriginalDataAttribute);
+                        }
+                    }
+                    if (attr === 'src' && (tag === 'video' || tag === 'source')) {
                         var url = absoluteUrl(value || '');
-                        if (isManifestUrl(url)) {
-                            log(tag + '.setAttribute src manifest=' + url);
-                            rememberManifestUrl(url, tag + '.setAttribute');
+                        if (isRoutableMediaUrl(url)) {
+                            log(tag + '.setAttribute src media=' + url);
+                            if (isManifestUrl(url)) { rememberManifestUrl(url, tag + '.setAttribute'); }
                             if (pageLooksLikeVodPlayback()) {
                                 var video = tag === 'video' ? this : (this.parentNode && this.parentNode.tagName && String(this.parentNode.tagName).toLowerCase() === 'video' ? this.parentNode : null);
                                 routeManifestToE2(url, tag + '.setAttribute', video);
@@ -31714,9 +31840,9 @@ class OipfVideoBroadcastMapper {
                         var tag = target.tagName ? String(target.tagName).toLowerCase() : '';
                         if (tag === 'video' || tag === 'source') {
                             var url = absoluteUrl(target.src || target.getAttribute('src') || '');
-                            if (isManifestUrl(url)) {
-                                log('mutation src tag=' + tag + ' manifest=' + url);
-                                rememberManifestUrl(url, 'mutation-' + tag);
+                            if (isRoutableMediaUrl(url)) {
+                                log('mutation src tag=' + tag + ' media=' + url);
+                                if (isManifestUrl(url)) { rememberManifestUrl(url, 'mutation-' + tag); }
                             }
                         }
                     }
@@ -31728,9 +31854,9 @@ class OipfVideoBroadcastMapper {
                             var sources = node.querySelectorAll('video[src],source[src]');
                             Array.prototype.forEach.call(sources, function (source) {
                                 var url = absoluteUrl(source.src || source.getAttribute('src') || '');
-                                if (isManifestUrl(url)) {
-                                    log('added ' + source.tagName + ' manifest=' + url);
-                                    rememberManifestUrl(url, 'added-' + source.tagName);
+                                if (isRoutableMediaUrl(url)) {
+                                    log('added ' + source.tagName + ' media=' + url);
+                                    if (isManifestUrl(url)) { rememberManifestUrl(url, 'added-' + source.tagName); }
                                 }
                             });
                         });
@@ -31757,6 +31883,7 @@ class OipfVideoBroadcastMapper {
         }
     }
 
+    installNativeMediaGuard();
     installFetchInterceptor();
     installXhrInterceptor();
     installVideoInterceptor();
