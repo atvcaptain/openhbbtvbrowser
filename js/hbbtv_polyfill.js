@@ -29956,12 +29956,6 @@ class OipfAVControlMapper {
             window.HBBTV_POLYFILL_NS.avControlObjects.push(this.avControlObject);
         }
         window.HBBTV_POLYFILL_NS.setStreamState = function (state, error) {
-            window.HBBTV_POLYFILL_NS.lastExternalStreamState = state;
-            if (state === PLAY_STATES.playing) {
-                window.HBBTV_POLYFILL_NS.lastExternalStreamPlayingAt = Date.now();
-            } else if (state === PLAY_STATES.stopped) {
-                window.HBBTV_POLYFILL_NS.lastExternalStreamStoppedAt = Date.now();
-            }
             var objects = window.HBBTV_POLYFILL_NS.avControlObjects || [];
             objects.forEach(function (obj) {
                 if (!obj || !obj.isConnected) {
@@ -29982,14 +29976,14 @@ class OipfAVControlMapper {
             window.HBBTV_POLYFILL_NS.pendingStreamState = null;
         }
         this.avControlObject.__openhbbtvMapper = this;
-        window.HBBTV_POLYFILL_NS.schedulePendingAvControlAutoStart = function (reason) {
+        window.HBBTV_POLYFILL_NS.probePendingAvControlAutoStart = function (reason) {
             var objects = window.HBBTV_POLYFILL_NS.avControlObjects || [];
             objects.forEach(function (obj) {
                 if (!obj || !obj.isConnected || !obj.__openhbbtvMapper ||
-                    typeof obj.__openhbbtvMapper.scheduleAutoStartAfterDataChange !== 'function') {
+                    typeof obj.__openhbbtvMapper.probeAutoStartAfterBroadcastStop !== 'function') {
                     return;
                 }
-                obj.__openhbbtvMapper.scheduleAutoStartAfterDataChange(reason || 'global request');
+                obj.__openhbbtvMapper.probeAutoStartAfterBroadcastStop(reason || 'global probe');
             });
         };
 
@@ -30036,20 +30030,12 @@ class OipfAVControlMapper {
             window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
             const ns = window.HBBTV_POLYFILL_NS;
             const lastBroadcastStopAt = ns.lastBroadcastStopAt || 0;
-            const lastExternalStreamStoppedAt = ns.lastExternalStreamStoppedAt || 0;
             const scheduledAt = Date.now();
             if (!lastBroadcastStopAt || scheduledAt - lastBroadcastStopAt > 5000) {
                 return;
             }
-            if (!lastExternalStreamStoppedAt || scheduledAt - lastExternalStreamStoppedAt > 120000) {
-                return;
-            }
             const scheduledUrl = this.originalDataAttribute || '';
             if (!scheduledUrl || scheduledUrl === 'about:blank') {
-                return;
-            }
-            if (ns.lastPlayStreamUrl && scheduledUrl === ns.lastPlayStreamUrl) {
-                send("LOG:AVControl delayed PLAY_STREAM skipped unchanged url " + reason);
                 return;
             }
             clearAutoStartTimer();
@@ -30077,7 +30063,40 @@ class OipfAVControlMapper {
             }, 1300);
         };
 
-        this.scheduleAutoStartAfterDataChange = scheduleAutoStartAfterDataChange;
+        const probeAutoStartAfterBroadcastStop = (reason) => {
+            if (!this.isDashVideo) {
+                return;
+            }
+            window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
+            const ns = window.HBBTV_POLYFILL_NS;
+            const lastBroadcastStopAt = ns.lastBroadcastStopAt || 0;
+            const now = Date.now();
+            if (!lastBroadcastStopAt || now - lastBroadcastStopAt > 6000) {
+                return;
+            }
+            const currentData = this.avControlObject.data || this.avControlObject.getAttribute('data') || '';
+            if (!currentData || currentData === 'about:blank') {
+                send("LOG:AVControl data probe without current data " + reason);
+                return;
+            }
+            if (ns.lastPlayStreamUrl && currentData === ns.lastPlayStreamUrl) {
+                send("LOG:AVControl data probe skipped unchanged url " + reason);
+                return;
+            }
+            if (this.avControlObject.playState === PLAY_STATES.connecting || this.avControlObject.playState === PLAY_STATES.playing) {
+                send("LOG:AVControl data probe skipped state " + this.avControlObject.playState + " " + reason);
+                return;
+            }
+            if (this.originalDataAttribute !== currentData) {
+                send("LOG:AVControl data probe changed url " + reason);
+                this.originalDataAttribute = currentData;
+            } else {
+                send("LOG:AVControl data probe current url " + reason);
+            }
+            scheduleAutoStartAfterDataChange("data probe " + reason);
+        };
+
+        this.probeAutoStartAfterBroadcastStop = probeAutoStartAfterBroadcastStop;
 
         const updateOriginalDataAttribute = () => {
             const currentData = this.avControlObject.data || this.avControlObject.getAttribute('data') || '';
@@ -30087,36 +30106,6 @@ class OipfAVControlMapper {
             }
             return this.originalDataAttribute || '';
         };
-
-        const installDataPropertyInterceptor = () => {
-            if (this._dataPropertyInterceptorInstalled) {
-                return;
-            }
-            this._dataPropertyInterceptorInstalled = true;
-            try {
-                Object.defineProperty(this.avControlObject, 'data', {
-                    configurable: true,
-                    enumerable: true,
-                    get: () => {
-                        return 'about:blank';
-                    },
-                    set: (value) => {
-                        const currentData = value ? String(value) : '';
-                        if (currentData && currentData !== 'about:blank') {
-                            const changed = this.originalDataAttribute !== currentData;
-                            this.originalDataAttribute = currentData;
-                            if (changed) {
-                                send("LOG:AVControl data property changed");
-                                scheduleAutoStartAfterDataChange("data property setter");
-                            }
-                        }
-                    }
-                });
-            } catch (e) {
-                send("LOG:AVControl data property interceptor failed");
-            }
-        };
-        installDataPropertyInterceptor();
 
         this.avControlObject.play = (speed) => {
             if (speed === 0) {
@@ -31122,10 +31111,10 @@ class OipfVideoBroadcastMapper {
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo stop() ...');
             window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
             window.HBBTV_POLYFILL_NS.lastBroadcastStopAt = Date.now();
-            if (typeof window.HBBTV_POLYFILL_NS.schedulePendingAvControlAutoStart === 'function') {
-                window.HBBTV_POLYFILL_NS.schedulePendingAvControlAutoStart('broadcast stop immediate');
-                window.setTimeout(function () { window.HBBTV_POLYFILL_NS.schedulePendingAvControlAutoStart('broadcast stop retry 300'); }, 300);
-                window.setTimeout(function () { window.HBBTV_POLYFILL_NS.schedulePendingAvControlAutoStart('broadcast stop retry 900'); }, 900);
+            if (typeof window.HBBTV_POLYFILL_NS.probePendingAvControlAutoStart === 'function') {
+                window.setTimeout(function () { window.HBBTV_POLYFILL_NS.probePendingAvControlAutoStart('broadcast stop probe 400'); }, 400);
+                window.setTimeout(function () { window.HBBTV_POLYFILL_NS.probePendingAvControlAutoStart('broadcast stop probe 1000'); }, 1000);
+                window.setTimeout(function () { window.HBBTV_POLYFILL_NS.probePendingAvControlAutoStart('broadcast stop probe 1700'); }, 1700);
             }
             send("BROADCAST_STOP");
             send("UNSET_VIDEO_WINDOW");
@@ -31136,10 +31125,10 @@ class OipfVideoBroadcastMapper {
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo release() ...');
             window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
             window.HBBTV_POLYFILL_NS.lastBroadcastStopAt = Date.now();
-            if (typeof window.HBBTV_POLYFILL_NS.schedulePendingAvControlAutoStart === 'function') {
-                window.HBBTV_POLYFILL_NS.schedulePendingAvControlAutoStart('broadcast stop immediate');
-                window.setTimeout(function () { window.HBBTV_POLYFILL_NS.schedulePendingAvControlAutoStart('broadcast stop retry 300'); }, 300);
-                window.setTimeout(function () { window.HBBTV_POLYFILL_NS.schedulePendingAvControlAutoStart('broadcast stop retry 900'); }, 900);
+            if (typeof window.HBBTV_POLYFILL_NS.probePendingAvControlAutoStart === 'function') {
+                window.setTimeout(function () { window.HBBTV_POLYFILL_NS.probePendingAvControlAutoStart('broadcast release probe 400'); }, 400);
+                window.setTimeout(function () { window.HBBTV_POLYFILL_NS.probePendingAvControlAutoStart('broadcast release probe 1000'); }, 1000);
+                window.setTimeout(function () { window.HBBTV_POLYFILL_NS.probePendingAvControlAutoStart('broadcast release probe 1700'); }, 1700);
             }
             send("BROADCAST_STOP");
             send("UNSET_VIDEO_WINDOW");
