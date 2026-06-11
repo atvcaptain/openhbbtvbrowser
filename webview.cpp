@@ -300,7 +300,7 @@ void WebView::showApplicationOverlay(const QString &reason)
         "  try {"
         "    if (window.oipfApplicationManager && window.oipfApplicationManager.getOwnerApplication) {"
         "      var app = window.oipfApplicationManager.getOwnerApplication(document);"
-        "      if (app && app.show) app.show();"
+        "      if (app) app._visible = true;"
         "    }"
         "  } catch (e) {}"
         "  try { window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('focus')); } catch (e) {}"

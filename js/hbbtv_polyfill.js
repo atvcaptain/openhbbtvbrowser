@@ -30721,7 +30721,8 @@ const hbbtvFn = function () {
     };
 
     Application.prototype.show = function () {
-        window.signalopenhbbtvbrowser && window.signalopenhbbtvbrowser('LOG:Application.show');
+        // Do not log Application.show: E2 treats visibility as layer state,
+        // and echoing app.show() can create a SHOW_APPLICATION feedback loop.
         if (this._document) {
             this._document.body.style.visibility = 'visible';
             return (this._visible = true);
@@ -30730,7 +30731,7 @@ const hbbtvFn = function () {
     };
 
     Application.prototype.hide = function () {
-        window.signalopenhbbtvbrowser && window.signalopenhbbtvbrowser('LOG:Application.hide');
+        // Do not log Application.hide for the same reason as Application.show.
         if (this._document) {
             this._document.body.style.visibility = 'hidden';
             this._visible = false;
