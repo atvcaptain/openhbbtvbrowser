@@ -29994,6 +29994,19 @@ class OipfAVControlMapper {
             window.addEventListener("keyup", openhbbtvKeyLogger, true);
         }
         window.HBBTV_POLYFILL_NS.setStreamState = function (state, error) {
+            try {
+                var session = window.HBBTV_POLYFILL_NS.openHbbtvMediaSession;
+                if (session) {
+                    if (state === PLAY_STATES.playing || state === 1) {
+                        session.state = 'active';
+                    } else if (state === PLAY_STATES.stopped || state === PLAY_STATES.paused || state === 0 || state === 2) {
+                        session.state = 'stopped';
+                    }
+                    session.lastStreamState = state;
+                    session.lastStreamError = error;
+                }
+            } catch (ignoreSessionState) {
+            }
             var objects = window.HBBTV_POLYFILL_NS.avControlObjects || [];
             objects.forEach(function (obj) {
                 if (!obj || !obj.isConnected) {
@@ -30145,6 +30158,7 @@ class OipfAVControlMapper {
             if (speed === 0) {
                 this.avControlObject.speed = 0;
                 trace("play(0) -> PAUSE_STREAM");
+                try { if (window.HBBTV_POLYFILL_NS && window.HBBTV_POLYFILL_NS.html5VodEndSession) { window.HBBTV_POLYFILL_NS.html5VodEndSession('avcontrol play(0)'); } } catch (ignoreEndSession) {}
                 send("PAUSE_STREAM");
                 dispatchPlayState(PLAY_STATES.paused, "play(0)");
             } else if (speed > 0) {
@@ -30155,7 +30169,12 @@ class OipfAVControlMapper {
                     return false;
                 }
                 blockNativeAvSurface('play(' + speed + ')');
-                blockNativeAvSurface('play(' + speed + ')');
+                if (window.HBBTV_POLYFILL_NS && window.HBBTV_POLYFILL_NS.html5VodReuseSession &&
+                    window.HBBTV_POLYFILL_NS.html5VodReuseSession(streamUrl, 'avcontrol play speed ' + speed)) {
+                    trace("play(" + speed + ") reuses existing media session url=" + streamUrl);
+                    dispatchPlayState(PLAY_STATES.connecting, "play(" + speed + ") reuse-session");
+                    return true;
+                }
                 trace("play(" + speed + ") -> PLAY_STREAM url=" + streamUrl);
                 markPlayStreamSent(streamUrl, "play speed " + speed);
                 send("PLAY_STREAM:" + streamUrl);
@@ -30167,6 +30186,12 @@ class OipfAVControlMapper {
                     send("LOG:AVControl.play ignored without data");
                     return false;
                 }
+                if (window.HBBTV_POLYFILL_NS && window.HBBTV_POLYFILL_NS.html5VodReuseSession &&
+                    window.HBBTV_POLYFILL_NS.html5VodReuseSession(streamUrl, 'avcontrol play speed ' + speed)) {
+                    trace("play(" + speed + ") reuses existing media session url=" + streamUrl);
+                    dispatchPlayState(PLAY_STATES.connecting, "play(" + speed + ") reuse-session");
+                    return true;
+                }
                 trace("play(" + speed + ") -> PLAY_STREAM url=" + streamUrl);
                 markPlayStreamSent(streamUrl, "play speed " + speed);
                 send("PLAY_STREAM:" + streamUrl);
@@ -30176,6 +30201,7 @@ class OipfAVControlMapper {
         };
         this.avControlObject.stop = () => {
             trace("stop() -> STOP_STREAM");
+            try { if (window.HBBTV_POLYFILL_NS && window.HBBTV_POLYFILL_NS.html5VodEndSession) { window.HBBTV_POLYFILL_NS.html5VodEndSession('avcontrol stop'); } } catch (ignoreEndSession) {}
             send("STOP_STREAM");
             this.avControlObject.playPosition = 0;
             this.avControlObject.speed = 0;
@@ -31415,6 +31441,8 @@ class OipfVideoBroadcastMapper {
     ns.html5VodLastRoutedUrl = '';
     ns.html5VodLastRoutedAt = 0;
     ns.html5VodPendingPlayAt = 0;
+    ns.openHbbtvMediaSessionCounter = ns.openHbbtvMediaSessionCounter || 0;
+    ns.openHbbtvMediaSession = ns.openHbbtvMediaSession || null;
 
     function send(command) {
         try {
@@ -31590,7 +31618,22 @@ class OipfVideoBroadcastMapper {
         }
     }
 
-    function routeManifestToE2(url, reason, video, manifestText) {
+    function sameMediaUrl(a, b) {
+        try {
+            return absoluteUrl(a || '') === absoluteUrl(b || '');
+        } catch (ignore) {
+            return String(a || '') === String(b || '');
+        }
+    }
+
+    function mediaSessionSummary(session) {
+        if (!session) {
+            return 'none';
+        }
+        return 'id=' + session.id + ' state=' + session.state + ' source=' + session.source + ' url=' + session.url;
+    }
+
+    function startOrReuseMediaSession(url, reason, video, manifestText) {
         url = absoluteUrl(url);
         if (!isRoutableMediaUrl(url)) {
             return false;
@@ -31600,23 +31643,76 @@ class OipfVideoBroadcastMapper {
             return false;
         }
         var now = Date.now();
-        if (ns.html5VodLastRoutedUrl === url && (now - ns.html5VodLastRoutedAt) < 2500) {
-            log('skip duplicate route url=' + url + ' reason=' + reason);
+        var session = ns.openHbbtvMediaSession;
+        if (session && sameMediaUrl(session.url, url) && session.state !== 'stopped') {
+            session.lastSeenAt = now;
+            session.lastReason = reason || session.lastReason || '';
+            log('reuse media session ' + mediaSessionSummary(session) + ' reason=' + reason);
+            blockNativeVideo(video, reason + ' reuse-session');
             return true;
         }
+        ns.openHbbtvMediaSessionCounter += 1;
+        session = {
+            id: ns.openHbbtvMediaSessionCounter,
+            url: url,
+            state: 'requested',
+            source: reason || '',
+            createdAt: now,
+            lastSeenAt: now,
+            lastReason: reason || ''
+        };
+        ns.openHbbtvMediaSession = session;
         ns.html5VodLastRoutedUrl = url;
         ns.html5VodLastRoutedAt = now;
         ns.html5VodE2Active = true;
-        log('route to E2 reason=' + reason + ' url=' + url + ' page=' + window.location.href);
+        log('start media session ' + mediaSessionSummary(session) + ' page=' + window.location.href);
         blockNativeVideo(video, reason);
         send('PLAY_STREAM:' + url);
         window.setTimeout(function () {
-            blockNativeVideo(video, reason + ' delayed');
+            if (ns.openHbbtvMediaSession && ns.openHbbtvMediaSession.id === session.id && ns.openHbbtvMediaSession.state !== 'stopped') {
+                blockNativeVideo(video, reason + ' delayed');
+            }
         }, 150);
         window.setTimeout(function () {
-            blockNativeVideo(video, reason + ' delayed2');
+            if (ns.openHbbtvMediaSession && ns.openHbbtvMediaSession.id === session.id && ns.openHbbtvMediaSession.state !== 'stopped') {
+                blockNativeVideo(video, reason + ' delayed2');
+            }
         }, 600);
         return true;
+    }
+
+    ns.html5VodReuseSession = function (url, reason) {
+        url = absoluteUrl(url || '');
+        var session = ns.openHbbtvMediaSession;
+        if (!session || !sameMediaUrl(session.url, url) || session.state === 'stopped') {
+            return false;
+        }
+        session.lastSeenAt = Date.now();
+        session.lastReason = reason || session.lastReason || '';
+        log('avcontrol reused media session ' + mediaSessionSummary(session) + ' reason=' + reason);
+        return true;
+    };
+
+    ns.html5VodEndSession = function (reason) {
+        var session = ns.openHbbtvMediaSession;
+        if (!session || session.state === 'stopped') {
+            log('end media session ignored reason=' + reason + ' session=' + mediaSessionSummary(session));
+            return false;
+        }
+        session.state = 'stopped';
+        session.stoppedAt = Date.now();
+        session.stopReason = reason || '';
+        ns.html5VodE2Active = false;
+        log('end media session ' + mediaSessionSummary(session) + ' reason=' + reason);
+        return true;
+    };
+
+    function routeManifestToE2(url, reason, video, manifestText) {
+        url = absoluteUrl(url);
+        if (!isRoutableMediaUrl(url)) {
+            return false;
+        }
+        return startOrReuseMediaSession(url, reason, video, manifestText);
     }
 
     function rememberManifestUrl(url, source, manifestText) {
@@ -32063,6 +32159,85 @@ class OipfVideoBroadcastMapper {
     window.setTimeout(function () { installHtml5VodHooks('retry100'); }, 100);
     window.setTimeout(function () { installHtml5VodHooks('retry500'); }, 500);
     window.setTimeout(function () { installHtml5VodHooks('retry1500'); }, 1500);
+}());
+
+
+// Central OpenHbbTV key broker used by the C++ side.  Dispatch to a stable
+// DOM target instead of guessing the current activeElement after browser hide/show.
+(function () {
+    if (typeof window !== 'object' || typeof document !== 'object') {
+        return;
+    }
+    if (window.__openhbbtvInjectKey) {
+        return;
+    }
+    function send(command) {
+        try {
+            if (window.signalopenhbbtvbrowser) {
+                window.signalopenhbbtvbrowser(command);
+            }
+        } catch (ignore) {
+        }
+    }
+    function keyName(value) {
+        if (value >= 48 && value <= 57) { return String.fromCharCode(value); }
+        if (value === 13) { return 'Enter'; }
+        if (value === 37) { return 'ArrowLeft'; }
+        if (value === 38) { return 'ArrowUp'; }
+        if (value === 39) { return 'ArrowRight'; }
+        if (value === 40) { return 'ArrowDown'; }
+        if (value === 403) { return 'Red'; }
+        if (value === 404) { return 'Green'; }
+        if (value === 405) { return 'Yellow'; }
+        if (value === 406) { return 'Blue'; }
+        if (value === 461) { return 'Backspace'; }
+        if (value === 413) { return 'Stop'; }
+        if (value === 415) { return 'Play'; }
+        return String(value);
+    }
+    function describe(target) {
+        try {
+            if (!target) { return 'null'; }
+            var tag = target.tagName || target.nodeName || typeof target;
+            var id = target.id ? ('#' + target.id) : '';
+            var cls = target.className ? ('.' + String(target.className).replace(/\s+/g, '.').slice(0, 60)) : '';
+            return tag + id + cls;
+        } catch (ignore) {
+            return 'unknown';
+        }
+    }
+    function makeEvent(type, code, vkName) {
+        var key = keyName(code);
+        var e = new KeyboardEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            key: key,
+            code: vkName || key,
+            keyCode: code,
+            which: code
+        });
+        try { Object.defineProperty(e, 'keyCode', { value: code }); } catch (ignoreKeyCode) {}
+        try { Object.defineProperty(e, 'which', { value: code }); } catch (ignoreWhich) {}
+        try { Object.defineProperty(e, 'charCode', { value: 0 }); } catch (ignoreCharCode) {}
+        return e;
+    }
+    window.__openhbbtvInjectKey = function (code, vkName) {
+        code = parseInt(code, 10) || 0;
+        var target = document.body || document.documentElement || document;
+        try {
+            if (target && target.focus) {
+                target.focus();
+            }
+        } catch (ignoreFocus) {
+        }
+        send('LOG:InjectedKey broker target=' + describe(target) + ' active=' + describe(document.activeElement) + ' key=' + code + ' vk=' + (vkName || ''));
+        try { target.dispatchEvent(makeEvent('keydown', code, vkName)); } catch (e1) { send('LOG:InjectedKey keydown failed ' + e1); }
+        window.setTimeout(function () {
+            try { target.dispatchEvent(makeEvent('keyup', code, vkName)); } catch (e2) { send('LOG:InjectedKey keyup failed ' + e2); }
+        }, 25);
+        return true;
+    };
 }());
 
 //# sourceMappingURL=hbbtv_polyfill.js.map

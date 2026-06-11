@@ -713,32 +713,25 @@ void WebView::sendKeyEvent(const int &keyCode)
 void WebView::injectKeyEvent(int keyCode)
 {
     QMetaEnum metaEnum = QMetaEnum::fromType<VirtualKey::VirtualKeyType>();
+    const QString vkName = QString::fromLatin1(metaEnum.valueToKey(keyCode));
 
     QString s = QString::fromLatin1("(function() {"
                                     "  var code = %1;"
                                     "  var vkName = '%2';"
+                                    "  if (typeof window.__openhbbtvInjectKey === 'function') {"
+                                    "    try { window.__openhbbtvInjectKey(code, vkName); return; }"
+                                    "    catch (brokerError) { console.log('OpenHbbTV key broker failed', brokerError); }"
+                                    "  }"
                                     "  var resolved = (typeof window[vkName] !== 'undefined') ? window[vkName] : code;"
-                                    "  try { if (document.body && document.body.focus) document.body.focus(); } catch (ignore) {}"
-                                    "  function validTarget(node) {"
-                                    "    try {"
-                                    "      if (!node || !node.dispatchEvent) return false;"
-                                    "      if (node === window || node === document) return true;"
-                                    "      return !!(document.documentElement && document.documentElement.contains(node));"
-                                    "    } catch (ignore) { return false; }"
-                                    "  }"
-                                    "  function resolveTarget() {"
-                                    "    var target = null;"
-                                    "    try { target = document.activeElement; } catch (ignore) {}"
-                                    "    if (!validTarget(target)) target = document.body || document.documentElement || document;"
-                                    "    return target || document || window;"
-                                    "  }"
+                                    "  var target = document.body || document.documentElement || document.activeElement || document;"
+                                    "  try { if (target && target.focus) target.focus(); } catch (ignore) {}"
                                     "  function keyName(value) {"
                                     "    if (value >= 48 && value <= 57) return String.fromCharCode(value);"
                                     "    if (value === 13) return 'Enter';"
-                                    "    if (value === 37 || value === 403) return 'ArrowLeft';"
-                                    "    if (value === 38 || value === 404) return 'ArrowUp';"
-                                    "    if (value === 39 || value === 405) return 'ArrowRight';"
-                                    "    if (value === 40 || value === 406) return 'ArrowDown';"
+                                    "    if (value === 37) return 'ArrowLeft';"
+                                    "    if (value === 38) return 'ArrowUp';"
+                                    "    if (value === 39) return 'ArrowRight';"
+                                    "    if (value === 40) return 'ArrowDown';"
                                     "    if (value === 461) return 'Backspace';"
                                     "    if (value === 413) return 'Stop';"
                                     "    if (value === 415) return 'Play';"
@@ -759,17 +752,12 @@ void WebView::injectKeyEvent(int keyCode)
                                     "    try { Object.defineProperty(e, 'charCode', { value: 0 }); } catch (ignore) {}"
                                     "    return e;"
                                     "  }"
-                                    "  var target = resolveTarget();"
-                                    "  var targetName = 'unknown';"
-                                    "  try { targetName = (target === window) ? 'window' : ((target === document) ? 'document' : ((target.tagName || target.nodeName || 'node') + '')); } catch (ignore) {}"
-                                    "  try { if (window.__openhbbtvLog) window.__openhbbtvLog('InjectedKey target=' + targetName + ' key=' + resolved); } catch (ignore) {}"
                                     "  try { target.dispatchEvent(makeEvent('keydown')); } catch (e) { console.log('OpenHbbTV keydown failed', e); }"
                                     "  window.setTimeout(function() {"
-                                    "    var upTarget = resolveTarget();"
-                                    "    try { upTarget.dispatchEvent(makeEvent('keyup')); } catch (e) { console.log('OpenHbbTV keyup failed', e); }"
+                                    "    try { target.dispatchEvent(makeEvent('keyup')); } catch (e) { console.log('OpenHbbTV keyup failed', e); }"
                                     "  }, 25);"
-                                    "})();").arg(keyCode).arg(metaEnum.valueToKey(keyCode));
-    qDebug() << "[OpenHbbTV] inject keydown+keyup target-after-focus" << keyCode;
+                                    "})();").arg(keyCode).arg(vkName);
+    qDebug() << "[OpenHbbTV] inject keydown+keyup broker" << keyCode;
     page()->runJavaScript(s);
 }
 
