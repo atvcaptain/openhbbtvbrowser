@@ -31639,53 +31639,114 @@ class OipfVideoBroadcastMapper {
 
     ns.html5VodRouteObjectMedia = routeObjectMediaToE2;
 
-    function installNativeMediaGuard() {
-        if (ns.html5VodNativeGuardInstalled) {
-            return;
-        }
-        ns.html5VodNativeGuardInstalled = true;
+    function shouldRouteObjectMedia(type, url) {
+        return isRoutableMediaUrl(url) && (isOipfMediaType(type) || isProgressiveMediaUrl(url) || pageLooksLikeVodPlayback());
+    }
 
-        function rememberObjectMedia(objectElement, url, reason) {
-            try {
-                url = absoluteUrl(url || '');
-                if (!url || !isRoutableMediaUrl(url)) {
-                    return false;
-                }
-                objectElement.__openhbbtvOriginalDataAttribute = url;
-                log('object native media guarded reason=' + reason + ' type=' + (objectElement.type || objectElement.getAttribute && objectElement.getAttribute('type') || '') + ' url=' + url);
-                routeObjectMediaToE2(url, reason, objectElement);
-                return true;
-            } catch (error) {
-                log('object native media guard failed reason=' + reason + ' error=' + error);
+    function rememberObjectMedia(objectElement, url, reason) {
+        try {
+            url = absoluteUrl(url || '');
+            if (!url || !isRoutableMediaUrl(url)) {
                 return false;
             }
+            var objectType = objectElement && (objectElement.type || objectElement.getAttribute && objectElement.getAttribute('type') || '') || '';
+            if (!shouldRouteObjectMedia(objectType, url)) {
+                return false;
+            }
+            if (objectElement) {
+                objectElement.__openhbbtvOriginalDataAttribute = url;
+            }
+            log('object native media guarded reason=' + reason + ' type=' + objectType + ' url=' + url);
+            routeObjectMediaToE2(url, reason, objectElement);
+            return true;
+        } catch (error) {
+            log('object native media guard failed reason=' + reason + ' error=' + error);
+            return false;
         }
+    }
 
+    function installNativeMediaGuard() {
+        if (ns.html5VodNativeGuardInstalled) {
+            return true;
+        }
         try {
             var objectProto = window.HTMLObjectElement && window.HTMLObjectElement.prototype;
-            if (objectProto) {
-                var dataDescriptor = Object.getOwnPropertyDescriptor(objectProto, 'data');
-                if (dataDescriptor && dataDescriptor.set && dataDescriptor.get) {
-                    Object.defineProperty(objectProto, 'data', {
-                        enumerable: dataDescriptor.enumerable,
-                        configurable: true,
-                        get: function () {
-                            return this.__openhbbtvOriginalDataAttribute || dataDescriptor.get.call(this);
-                        },
-                        set: function (value) {
-                            var type = this.type || this.getAttribute && this.getAttribute('type') || '';
-                            if (isOipfMediaType(type) && rememberObjectMedia(this, value, 'object.data setter')) {
-                                return dataDescriptor.set.call(this, 'about:blank');
-                            }
-                            return dataDescriptor.set.call(this, value);
-                        }
-                    });
-                    log('object.data native guard installed');
-                }
+            if (!objectProto) {
+                return false;
             }
+            var dataDescriptor = Object.getOwnPropertyDescriptor(objectProto, 'data');
+            if (!(dataDescriptor && dataDescriptor.set && dataDescriptor.get)) {
+                return false;
+            }
+            Object.defineProperty(objectProto, 'data', {
+                enumerable: dataDescriptor.enumerable,
+                configurable: true,
+                get: function () {
+                    return this.__openhbbtvOriginalDataAttribute || dataDescriptor.get.call(this);
+                },
+                set: function (value) {
+                    if (rememberObjectMedia(this, value, 'object.data setter')) {
+                        return dataDescriptor.set.call(this, 'about:blank');
+                    }
+                    return dataDescriptor.set.call(this, value);
+                }
+            });
+            ns.html5VodNativeGuardInstalled = true;
+            log('object.data native guard installed');
+            return true;
         } catch (error) {
             log('object.data native guard install failed error=' + error);
+            return false;
         }
+    }
+
+    function installElementAttributeGuard() {
+        if (ns.html5VodElementAttrGuardInstalled) {
+            return true;
+        }
+        var nativeSetAttribute = window.Element && window.Element.prototype && window.Element.prototype.setAttribute;
+        if (!nativeSetAttribute) {
+            return false;
+        }
+        window.Element.prototype.setAttribute = function (name, value) {
+            try {
+                var tag = this.tagName ? String(this.tagName).toLowerCase() : '';
+                var attr = String(name || '').toLowerCase();
+                if (tag === 'object' && attr === 'data') {
+                    var objectUrl = absoluteUrl(value || '');
+                    if (rememberObjectMedia(this, objectUrl, 'object.setAttribute data')) {
+                        value = 'about:blank';
+                    }
+                }
+                if (tag === 'object' && attr === 'type') {
+                    var currentData = this.__openhbbtvOriginalDataAttribute || this.data || this.getAttribute && this.getAttribute('data') || '';
+                    if (shouldRouteObjectMedia(value, currentData)) {
+                        this.__openhbbtvOriginalDataAttribute = absoluteUrl(currentData);
+                        nativeSetAttribute.call(this, 'data', 'about:blank');
+                        log('object.setAttribute type guarded type=' + value + ' url=' + this.__openhbbtvOriginalDataAttribute);
+                        routeObjectMediaToE2(this.__openhbbtvOriginalDataAttribute, 'object.setAttribute type', this);
+                    }
+                }
+                if (attr === 'src' && (tag === 'video' || tag === 'source')) {
+                    var mediaUrl = absoluteUrl(value || '');
+                    if (isRoutableMediaUrl(mediaUrl)) {
+                        log(tag + '.setAttribute src media=' + mediaUrl);
+                        if (isManifestUrl(mediaUrl)) { rememberManifestUrl(mediaUrl, tag + '.setAttribute'); }
+                        if (pageLooksLikeVodPlayback() || isProgressiveMediaUrl(mediaUrl)) {
+                            var video = tag === 'video' ? this : (this.parentNode && this.parentNode.tagName && String(this.parentNode.tagName).toLowerCase() === 'video' ? this.parentNode : null);
+                            if (routeManifestToE2(mediaUrl, tag + '.setAttribute', video)) {
+                                value = '';
+                            }
+                        }
+                    }
+                }
+            } catch (ignore) {
+            }
+            return nativeSetAttribute.call(this, name, value);
+        };
+        ns.html5VodElementAttrGuardInstalled = true;
+        log('element.setAttribute media guard installed');
+        return true;
     }
 
     function installFetchInterceptor() {
@@ -31821,7 +31882,7 @@ class OipfVideoBroadcastMapper {
             }
         }
 
-        if (nativeSetAttribute) {
+        if (nativeSetAttribute && !ns.html5VodElementAttrGuardInstalled) {
             window.Element.prototype.setAttribute = function (name, value) {
                 try {
                     var tag = this.tagName ? String(this.tagName).toLowerCase() : '';
@@ -31832,6 +31893,7 @@ class OipfVideoBroadcastMapper {
                         if (isOipfMediaType(objectType) && isRoutableMediaUrl(objectUrl)) {
                             this.__openhbbtvOriginalDataAttribute = objectUrl;
                             log('object.setAttribute data guarded type=' + objectType + ' url=' + objectUrl);
+                            routeObjectMediaToE2(objectUrl, 'video-interceptor object.setAttribute data', this);
                             value = 'about:blank';
                         }
                     }
@@ -31841,6 +31903,7 @@ class OipfVideoBroadcastMapper {
                             this.__openhbbtvOriginalDataAttribute = absoluteUrl(currentData);
                             nativeSetAttribute.call(this, 'data', 'about:blank');
                             log('object.setAttribute type guarded type=' + value + ' url=' + this.__openhbbtvOriginalDataAttribute);
+                            routeObjectMediaToE2(this.__openhbbtvOriginalDataAttribute, 'video-interceptor object.setAttribute type', this);
                         }
                     }
                     if (attr === 'src' && (tag === 'video' || tag === 'source')) {
@@ -31871,14 +31934,25 @@ class OipfVideoBroadcastMapper {
         var observer = new MutationObserver(function (mutations) {
             mutations.forEach(function (mutation) {
                 try {
-                    if (mutation.type === 'attributes' && String(mutation.attributeName).toLowerCase() === 'src') {
+                    if (mutation.type === 'attributes') {
                         var target = mutation.target;
+                        var attrName = String(mutation.attributeName || '').toLowerCase();
                         var tag = target.tagName ? String(target.tagName).toLowerCase() : '';
-                        if (tag === 'video' || tag === 'source') {
+                        if ((tag === 'video' || tag === 'source') && attrName === 'src') {
                             var url = absoluteUrl(target.src || target.getAttribute('src') || '');
                             if (isRoutableMediaUrl(url)) {
                                 log('mutation src tag=' + tag + ' media=' + url);
                                 if (isManifestUrl(url)) { rememberManifestUrl(url, 'mutation-' + tag); }
+                                if (pageLooksLikeVodPlayback() || isProgressiveMediaUrl(url)) {
+                                    var video = tag === 'video' ? target : (target.parentNode && target.parentNode.tagName && String(target.parentNode.tagName).toLowerCase() === 'video' ? target.parentNode : null);
+                                    routeManifestToE2(url, 'mutation-' + tag, video);
+                                }
+                            }
+                        }
+                        if (tag === 'object' && (attrName === 'data' || attrName === 'type')) {
+                            var objectUrl = absoluteUrl(target.__openhbbtvOriginalDataAttribute || target.data || target.getAttribute('data') || '');
+                            if (rememberObjectMedia(target, objectUrl, 'mutation-object-' + attrName)) {
+                                try { target.setAttribute('data', 'about:blank'); } catch (ignoreBlank) {}
                             }
                         }
                     }
@@ -31887,12 +31961,22 @@ class OipfVideoBroadcastMapper {
                             if (!node || !node.querySelectorAll) {
                                 return;
                             }
-                            var sources = node.querySelectorAll('video[src],source[src]');
+                            var sources = node.querySelectorAll('video[src],source[src],object[data]');
                             Array.prototype.forEach.call(sources, function (source) {
-                                var url = absoluteUrl(source.src || source.getAttribute('src') || '');
+                                var tagName = source.tagName ? String(source.tagName).toLowerCase() : '';
+                                var url = absoluteUrl(source.src || source.getAttribute('src') || source.__openhbbtvOriginalDataAttribute || source.data || source.getAttribute('data') || '');
                                 if (isRoutableMediaUrl(url)) {
                                     log('added ' + source.tagName + ' media=' + url);
-                                    if (isManifestUrl(url)) { rememberManifestUrl(url, 'added-' + source.tagName); }
+                                    if (tagName === 'object') {
+                                        rememberObjectMedia(source, url, 'added-object');
+                                        try { source.setAttribute('data', 'about:blank'); } catch (ignoreAddedBlank) {}
+                                    } else {
+                                        if (isManifestUrl(url)) { rememberManifestUrl(url, 'added-' + source.tagName); }
+                                        if (pageLooksLikeVodPlayback() || isProgressiveMediaUrl(url)) {
+                                            var video = tagName === 'video' ? source : (source.parentNode && source.parentNode.tagName && String(source.parentNode.tagName).toLowerCase() === 'video' ? source.parentNode : null);
+                                            routeManifestToE2(url, 'added-' + source.tagName, video);
+                                        }
+                                    }
                                 }
                             });
                         });
@@ -31907,7 +31991,7 @@ class OipfVideoBroadcastMapper {
                     childList: true,
                     subtree: true,
                     attributes: true,
-                    attributeFilter: ['src']
+                    attributeFilter: ['src', 'data', 'type']
                 });
                 log('mutation observer installed');
             }
@@ -31919,12 +32003,27 @@ class OipfVideoBroadcastMapper {
         }
     }
 
-    installNativeMediaGuard();
-    installFetchInterceptor();
-    installXhrInterceptor();
-    installVideoInterceptor();
-    installMutationObserver();
-    log('bridge installed page=' + window.location.href);
+    function installHtml5VodHooks(reason) {
+        installNativeMediaGuard();
+        installElementAttributeGuard();
+        installFetchInterceptor();
+        installXhrInterceptor();
+        installVideoInterceptor();
+        installMutationObserver();
+        if (!ns.html5VodBridgeLogged) {
+            ns.html5VodBridgeLogged = true;
+            log('bridge installed page=' + window.location.href + ' reason=' + reason);
+        }
+    }
+
+    installHtml5VodHooks('initial');
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function () { installHtml5VodHooks('domcontentloaded'); }, false);
+    }
+    window.addEventListener('load', function () { installHtml5VodHooks('load'); }, false);
+    window.setTimeout(function () { installHtml5VodHooks('retry100'); }, 100);
+    window.setTimeout(function () { installHtml5VodHooks('retry500'); }, 500);
+    window.setTimeout(function () { installHtml5VodHooks('retry1500'); }, 1500);
 }());
 
 //# sourceMappingURL=hbbtv_polyfill.js.map
