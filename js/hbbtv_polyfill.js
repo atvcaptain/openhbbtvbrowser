@@ -31098,6 +31098,24 @@ class OipfVideoBroadcastMapper {
             send("NEXT_CHANNEL");
             return currentChannel;
         };
+        const scheduleStoppedConfirm = (reason) => {
+            window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
+            const ns = window.HBBTV_POLYFILL_NS;
+            const stopToken = ns.lastBroadcastStopAt || Date.now();
+            const runConfirm = (delay) => {
+                window.setTimeout(function () {
+                    const lastPlay = ns.lastPlayStreamAt || 0;
+                    if (lastPlay > stopToken) {
+                        send("LOG:BroadcastVideo stopped confirm skipped reason=" + reason + " delay=" + delay + " lastPlayAfterStop=true");
+                        return;
+                    }
+                    send("LOG:BroadcastVideo stopped confirm reason=" + reason + " delay=" + delay);
+                    dispatchPlayState(0);
+                }, delay);
+            };
+            runConfirm(80);
+            runConfirm(180);
+        };
         oipfPluginObject.stop = function () {
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo stop() ...');
             window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
@@ -31106,6 +31124,7 @@ class OipfVideoBroadcastMapper {
             send("BROADCAST_STOP");
             send("UNSET_VIDEO_WINDOW");
             dispatchPlayState(0);
+            scheduleStoppedConfirm("stop");
             return true;
         };
         oipfPluginObject.release = function () {
@@ -31116,6 +31135,7 @@ class OipfVideoBroadcastMapper {
             send("BROADCAST_STOP");
             send("UNSET_VIDEO_WINDOW");
             dispatchPlayState(0);
+            scheduleStoppedConfirm("release");
         };
         startVideoWindowObserver();
         function ChannelConfig() {
