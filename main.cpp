@@ -57,7 +57,7 @@ int main(int argc, char *argv[])
     qputenv("QT_QPA_EGLFS_HIDECURSOR", QByteArrayLiteral("1"));
     installOpenHbbTVDebugLogger();
     qDebug() << "[OpenHbbTV] process start argc" << argc;
-    qDebug() << "[OpenHbbTV] process build id e2-rcu-owner-avcontrol-state-20260611";
+    qDebug() << "[OpenHbbTV] process build id e2-rcu-owner-minimal-ua-20260611";
     qDebug() << "[OpenHbbTV] build mode e2-rcu-owner-stream-overlay-window";
 #if defined(EMBEDDED_BUILD)
     HardwareProfile::applyEnvironment(argc, argv);
@@ -106,8 +106,15 @@ int main(int argc, char *argv[])
     QWebEngineSettings::defaultSettings()->setAttribute(QWebEngineSettings::ShowScrollBars, false);
     QWebEngineSettings::defaultSettings()->setAttribute(QWebEngineSettings::PlaybackRequiresUserGesture, false);
     QWebEngineSettings::defaultSettings()->setAttribute(QWebEngineSettings::DnsPrefetchEnabled, true);
-    QWebEngineProfile::defaultProfile()->setHttpUserAgent(
-        QWebEngineProfile::defaultProfile()->httpUserAgent() + QStringLiteral(" HbbTV/1.4.1 SmartTV2015"));
+
+    const QString defaultUserAgent = QWebEngineProfile::defaultProfile()->httpUserAgent();
+    const QByteArray userAgentOverride = qgetenv("OPENHBBTV_USER_AGENT");
+    const QString hbbtvUserAgent = userAgentOverride.isEmpty()
+            ? defaultUserAgent + QStringLiteral(" HbbTV/1.4.1 (; OpenATV; OpenHbbTV; 8.0; ; openhbbtv; )")
+            : QString::fromLocal8Bit(userAgentOverride);
+    QWebEngineProfile::defaultProfile()->setHttpUserAgent(hbbtvUserAgent);
+    qDebug() << "[OpenHbbTV] default user agent" << defaultUserAgent;
+    qDebug() << "[OpenHbbTV] active user agent" << hbbtvUserAgent;
 
     QString src = QStringLiteral("qrc:/hbbtv_polyfill.js");
     int onid = -1;

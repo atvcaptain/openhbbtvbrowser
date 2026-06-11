@@ -29951,68 +29951,31 @@ class OipfAVControlMapper {
         this.avControlObject.error = -1;
 
         window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
-        const ns = window.HBBTV_POLYFILL_NS;
-        ns.avControlObjects = ns.avControlObjects || [];
-        ns.nextAvControlId = (ns.nextAvControlId || 0) + 1;
-        this.avControlId = ns.nextAvControlId;
-        this.externalStreamOwner = false;
-        this.lastKnownStreamUrl = this.originalDataAttribute || "";
-        if (ns.avControlObjects.indexOf(this.avControlObject) < 0) {
-            ns.avControlObjects.push(this.avControlObject);
+        window.HBBTV_POLYFILL_NS.avControlObjects = window.HBBTV_POLYFILL_NS.avControlObjects || [];
+        if (window.HBBTV_POLYFILL_NS.avControlObjects.indexOf(this.avControlObject) < 0) {
+            window.HBBTV_POLYFILL_NS.avControlObjects.push(this.avControlObject);
         }
-        this.avControlObject.__openhbbtvMapper = this;
-
-        this.dispatchAvPlayState = (state, error, reason) => {
-            state = Number(state);
-            if (isNaN(state)) {
-                state = PLAY_STATES.error;
-            }
-            error = typeof error === 'number' ? error : -1;
-            this.avControlObject.playState = state;
-            this.avControlObject.error = error;
-            var playerEvent = new Event('PlayStateChange');
-            playerEvent.state = state;
-            playerEvent.playState = state;
-            playerEvent.error = error;
-            if (window.signalopenhbbtvbrowser) {
-                window.signalopenhbbtvbrowser("LOG:AVControl#" + this.avControlId + " PlayStateChange state=" + state + " error=" + error + " reason=" + (reason || ""));
-            }
-            if (this.avControlObject.onPlayStateChange) {
-                try {
-                    this.avControlObject.onPlayStateChange(state);
-                } catch (callbackError) {
-                    if (window.signalopenhbbtvbrowser) {
-                        window.signalopenhbbtvbrowser("LOG:AVControl#" + this.avControlId + " onPlayStateChange callback failed " + callbackError);
-                    }
-                }
-            }
-            this.avControlObject.dispatchEvent(playerEvent);
-        };
-
-        ns.setStreamState = function (state, error) {
-            var owner = ns.currentExternalStreamOwner || ns.lastExternalStreamOwner || null;
-            if (owner && owner.__openhbbtvMapper && owner.isConnected) {
-                owner.__openhbbtvMapper.dispatchAvPlayState(state, error, "backend setStreamState owner");
-                if (Number(state) === PLAY_STATES.stopped || Number(state) === PLAY_STATES.error || Number(state) === PLAY_STATES.finished) {
-                    owner.__openhbbtvMapper.clearExternalOwnership("backend final state " + state);
-                }
-                return;
-            }
-            var objects = ns.avControlObjects || [];
+        window.HBBTV_POLYFILL_NS.setStreamState = function (state, error) {
+            var objects = window.HBBTV_POLYFILL_NS.avControlObjects || [];
             objects.forEach(function (obj) {
-                if (!obj || !obj.isConnected || !obj.__openhbbtvMapper) {
+                if (!obj || !obj.isConnected) {
                     return;
                 }
-                obj.__openhbbtvMapper.dispatchAvPlayState(state, error, "backend setStreamState fallback");
+                obj.playState = state;
+                obj.error = error;
+                var playerEvent = new Event('PlayStateChange');
+                playerEvent.state = state;
+                if (obj.onPlayStateChange) {
+                    obj.onPlayStateChange(state);
+                }
+                obj.dispatchEvent(playerEvent);
             });
         };
-        if (ns.pendingStreamState) {
-            ns.setStreamState(ns.pendingStreamState[0], ns.pendingStreamState[1]);
-            ns.pendingStreamState = null;
+        if (window.HBBTV_POLYFILL_NS.pendingStreamState) {
+            window.HBBTV_POLYFILL_NS.setStreamState(window.HBBTV_POLYFILL_NS.pendingStreamState[0], window.HBBTV_POLYFILL_NS.pendingStreamState[1]);
+            window.HBBTV_POLYFILL_NS.pendingStreamState = null;
         }
-        if (window.signalopenhbbtvbrowser) {
-            window.signalopenhbbtvbrowser("LOG:AVControl#" + this.avControlId + " constructor dash=" + !!this.isDashVideo + " data=" + (this.originalDataAttribute || ""));
-        }
+        this.avControlObject.__openhbbtvMapper = this;
 
         this.mapAvControlToHtml5Video();
         this.watchAvControlObjectMutations(this.avControlObject);
@@ -30024,96 +29987,77 @@ class OipfAVControlMapper {
                 window.signalopenhbbtvbrowser(command);
             }
         };
-        const ns = window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
-        const dispatchPlayState = (state, error, reason) => {
-            this.dispatchAvPlayState(state, typeof error === 'number' ? error : -1, reason || "local");
-        };
-        const isExternalOwner = () => {
-            return ns.currentExternalStreamOwner === this.avControlObject || this.externalStreamOwner;
-        };
-        this.clearExternalOwnership = (reason) => {
-            if (ns.currentExternalStreamOwner === this.avControlObject) {
-                ns.currentExternalStreamOwner = null;
+        const dispatchPlayState = (state) => {
+            this.avControlObject.playState = state;
+            var playerEvent = new Event('PlayStateChange');
+            playerEvent.state = state;
+            if (this.avControlObject.onPlayStateChange) {
+                this.avControlObject.onPlayStateChange(state);
             }
-            if (ns.lastExternalStreamOwner === this.avControlObject && reason === "reset") {
-                ns.lastExternalStreamOwner = null;
-            }
-            this.externalStreamOwner = false;
-            send("LOG:AVControl#" + this.avControlId + " clear external owner reason=" + (reason || ""));
+            this.avControlObject.dispatchEvent(playerEvent);
         };
-        const markExternalOwner = (streamUrl, reason) => {
-            ns.currentExternalStreamOwner = this.avControlObject;
-            ns.lastExternalStreamOwner = this.avControlObject;
+
+        const clearAutoStartTimer = () => {
+            if (this._autoStartTimer) {
+                window.clearTimeout(this._autoStartTimer);
+                this._autoStartTimer = null;
+            }
+        };
+
+        const markPlayStreamSent = (streamUrl, reason) => {
+            window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
+            const ns = window.HBBTV_POLYFILL_NS;
             ns.lastPlayStreamAt = Date.now();
             ns.lastPlayStreamUrl = streamUrl || '';
-            this.externalStreamOwner = true;
-            this.lastKnownStreamUrl = streamUrl || this.lastKnownStreamUrl || '';
-            send("LOG:AVControl#" + this.avControlId + " PLAY_STREAM requested " + reason + " url=" + (streamUrl || ""));
+            clearAutoStartTimer();
+            send("LOG:AVControl PLAY_STREAM requested " + reason);
         };
+
+        // Minimal UA build: do not synthesize PLAY_STREAM from data changes or broadcast stop probes.
+        // Only a real AVControl.play(speed) call may start an external E2 stream.
+
         const updateOriginalDataAttribute = () => {
             const currentData = this.avControlObject.data || this.avControlObject.getAttribute('data') || '';
             if (currentData && currentData !== 'about:blank') {
                 this.originalDataAttribute = currentData;
-                this.lastKnownStreamUrl = currentData;
                 this.avControlObject.data = 'about:blank';
-                send("LOG:AVControl#" + this.avControlId + " data captured url=" + currentData);
             }
-            return this.originalDataAttribute || this.lastKnownStreamUrl || '';
+            return this.originalDataAttribute || '';
         };
 
         this.avControlObject.play = (speed) => {
-            speed = Number(speed);
-            if (isNaN(speed)) {
-                speed = 1;
-            }
-            send("LOG:AVControl#" + this.avControlId + " play called speed=" + speed + " state=" + this.avControlObject.playState + " owner=" + isExternalOwner());
             if (speed === 0) {
                 this.avControlObject.speed = 0;
-                if (isExternalOwner()) {
-                    send("PAUSE_STREAM");
-                }
-                dispatchPlayState(PLAY_STATES.paused, -1, "play(0)");
-                return true;
-            }
-            if (speed < 0) {
+                send("PAUSE_STREAM");
+                dispatchPlayState(PLAY_STATES.paused);
+            } else if (speed > 0) {
+                const streamUrl = updateOriginalDataAttribute();
                 this.avControlObject.speed = speed;
-                send("LOG:AVControl#" + this.avControlId + " negative speed ignored for external DASH speed=" + speed);
-                return true;
+                if (!streamUrl) {
+                    send("LOG:AVControl.play ignored without data");
+                    return false;
+                }
+                markPlayStreamSent(streamUrl, "play speed " + speed);
+                send("PLAY_STREAM:" + streamUrl);
+                dispatchPlayState(PLAY_STATES.connecting);
+            } else if (speed < 0) {
+                const streamUrl = updateOriginalDataAttribute();
+                this.avControlObject.speed = speed;
+                if (!streamUrl) {
+                    send("LOG:AVControl.play ignored without data");
+                    return false;
+                }
+                markPlayStreamSent(streamUrl, "play speed " + speed);
+                send("PLAY_STREAM:" + streamUrl);
+                dispatchPlayState(PLAY_STATES.connecting);
             }
-            const streamUrl = updateOriginalDataAttribute();
-            this.avControlObject.speed = speed;
-            if (!streamUrl || streamUrl === 'about:blank') {
-                send("LOG:AVControl#" + this.avControlId + " play ignored without data");
-                dispatchPlayState(PLAY_STATES.error, -1, "play without data");
-                return false;
-            }
-            markExternalOwner(streamUrl, "play speed " + speed);
-            dispatchPlayState(PLAY_STATES.connecting, -1, "play(" + speed + ")");
-            send("PLAY_STREAM:" + streamUrl);
             return true;
         };
         this.avControlObject.stop = () => {
-            send("LOG:AVControl#" + this.avControlId + " stop called state=" + this.avControlObject.playState + " owner=" + isExternalOwner());
-            if (isExternalOwner()) {
-                send("STOP_STREAM");
-            } else {
-                send("LOG:AVControl#" + this.avControlId + " stop without external owner");
-            }
+            send("STOP_STREAM");
             this.avControlObject.playPosition = 0;
             this.avControlObject.speed = 0;
-            dispatchPlayState(PLAY_STATES.stopped, -1, "stop()");
-            this.clearExternalOwnership("stop()");
-            return true;
-        };
-        this.avControlObject.release = () => {
-            send("LOG:AVControl#" + this.avControlId + " release called state=" + this.avControlObject.playState + " owner=" + isExternalOwner());
-            if (isExternalOwner()) {
-                send("STOP_STREAM");
-            }
-            this.avControlObject.playPosition = 0;
-            this.avControlObject.speed = 0;
-            dispatchPlayState(PLAY_STATES.stopped, -1, "release()");
-            this.clearExternalOwnership("release()");
+            dispatchPlayState(PLAY_STATES.stopped);
             return true;
         };
         this.avControlObject.seek = (posInMs) => {
@@ -30134,10 +30078,9 @@ class OipfAVControlMapper {
                 if (currentData && currentData !== "about:blank") {
                     const changed = this.originalDataAttribute !== currentData;
                     this.originalDataAttribute = currentData;
-                    this.lastKnownStreamUrl = currentData;
                     this.avControlObject.data = "about:blank";
-                    if (changed && window.signalopenhbbtvbrowser) {
-                        window.signalopenhbbtvbrowser("LOG:AVControl#" + this.avControlId + " data mutation captured url=" + currentData);
+                    if (changed) {
+                        send("LOG:AVControl data changed without autostart fallback");
                     }
                 }
             }
@@ -30495,7 +30438,6 @@ const hbbtvFn = function () {
             mimeType === 'application/oipfApplicationManager' ||
             mimeType === 'application/oipfCapabilities' ||
             mimeType === 'application/oipfConfiguration' ||
-            mimeType === 'application/oipfDrmAgent' ||
             mimeType === 'application/oipfParentalControlManager' ||
             mimeType === 'application/oipfSearchManager';
     };
@@ -30685,7 +30627,7 @@ const hbbtvFn = function () {
     var storedCapabilities = null;
     var currentCapabilities = storedCapabilities ||
         '<profilelist xmlns="urn:hbbtv:config:oitf:oitfCapabilities:2017-1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:hbbtv:config:oitf:oitfCapabilities:2017-1 hbbtv-capabilities-2020-1.xsd">' +
-        '<ui_profile name="OITF_HD_UIPROF+DVB_S+TRICKMODE+META_SI+META_EIT+RTSP+AVCAD+DRM">' +
+        '<ui_profile name="OITF_HD_UIPROF+DVB_S+TRICKMODE+META_SI+META_EIT+RTSP+AVCAD">' +
         '<ext>' +
         '<parentalcontrol schemes="dvb-si">true</parentalcontrol>' +
         '<clientMetadata type="dvb-si">true</clientMetadata>' +
@@ -30696,8 +30638,6 @@ const hbbtvFn = function () {
         '<profile>urn:hbbtv:ta:profile:2019:2</profile>' +
         '</ta>' +
         '</ext>' +
-        '<drm DRMSystemID="urn:dvb:casystemid:19219">TS MP4</drm>' +
-        '<drm DRMSystemID="urn:dvb:casystemid:1664" protectionGateways="ci+">TS</drm>' +
         '</ui_profile>' +
         '<audio_profile name=\"MPEG1_L3\" type=\"audio/mpeg\"/>' +
         '<audio_profile name=\"HEAAC\" type=\"audio/mp4\"/>' +
@@ -30818,6 +30758,9 @@ function init() {
             window.setTimeout(window.__openatvHbbtvFlushCommandQueue, 0);
         }
     };
+    window.signalopenhbbtvbrowser('LOG:OpenHbbTV navigator.userAgent=' + navigator.userAgent);
+    window.signalopenhbbtvbrowser('LOG:OpenHbbTV navigator.platform=' + navigator.platform + ' language=' + navigator.language);
+    window.signalopenhbbtvbrowser('LOG:OpenHbbTV capability policy: no +DL no +DRM');
 
     // intercept XMLHttpRequest
     let cefOldXHROpen = window.XMLHttpRequest.prototype.open;
@@ -31086,7 +31029,7 @@ class OipfVideoBroadcastMapper {
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo stop() ...');
             window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
             window.HBBTV_POLYFILL_NS.lastBroadcastStopAt = Date.now();
-            send("LOG:BroadcastVideo stop -> stopped state");
+            send("LOG:BroadcastVideo.stop without AVControl autostart fallback");
             send("BROADCAST_STOP");
             send("UNSET_VIDEO_WINDOW");
             dispatchPlayState(0);
@@ -31096,7 +31039,7 @@ class OipfVideoBroadcastMapper {
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo release() ...');
             window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
             window.HBBTV_POLYFILL_NS.lastBroadcastStopAt = Date.now();
-            send("LOG:BroadcastVideo release -> stopped state");
+            send("LOG:BroadcastVideo.release without AVControl autostart fallback");
             send("BROADCAST_STOP");
             send("UNSET_VIDEO_WINDOW");
             dispatchPlayState(0);
