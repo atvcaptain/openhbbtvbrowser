@@ -30054,11 +30054,11 @@ class OipfAVControlMapper {
 
         const blockNativeAvSurface = (reason) => {
             try {
-                this.avControlObject.data = 'about:blank';
-            } catch (ignoreData) {
-            }
-            try {
-                this.avControlObject.setAttribute('data', 'about:blank');
+                const rawData = this.avControlObject.getAttribute ? (this.avControlObject.getAttribute('data') || '') : '';
+                if (rawData !== 'about:blank' && !this.avControlObject.__openhbbtvDataBlanked) {
+                    this.avControlObject.__openhbbtvDataBlanked = true;
+                    this.avControlObject.setAttribute('data', 'about:blank');
+                }
             } catch (ignoreAttr) {
             }
             try {
@@ -30120,11 +30120,23 @@ class OipfAVControlMapper {
 
         const updateOriginalDataAttribute = () => {
             const guardedData = this.avControlObject.__openhbbtvOriginalDataAttribute || '';
-            const currentData = guardedData || this.avControlObject.data || this.avControlObject.getAttribute('data') || '';
+            if (guardedData) {
+                this.originalDataAttribute = guardedData;
+                return guardedData;
+            }
+            const rawData = this.avControlObject.getAttribute ? (this.avControlObject.getAttribute('data') || '') : '';
+            const objectData = this.avControlObject.data || '';
+            const currentData = objectData && objectData !== 'about:blank' ? objectData : rawData;
             if (currentData && currentData !== 'about:blank') {
                 this.originalDataAttribute = currentData;
                 this.avControlObject.__openhbbtvOriginalDataAttribute = currentData;
-                this.avControlObject.data = 'about:blank';
+                if (rawData !== 'about:blank' && !this.avControlObject.__openhbbtvDataBlanked) {
+                    this.avControlObject.__openhbbtvDataBlanked = true;
+                    try {
+                        this.avControlObject.setAttribute('data', 'about:blank');
+                    } catch (ignoreBlank) {
+                    }
+                }
             }
             return this.originalDataAttribute || this.avControlObject.__openhbbtvOriginalDataAttribute || '';
         };
@@ -30184,11 +30196,29 @@ class OipfAVControlMapper {
         // if url of control object changed - change url of video object
         const handleDataChanged = (event) => { // MutationRecord
             if (event.attributeName === "data") {
-                const currentData = this.avControlObject.__openhbbtvOriginalDataAttribute || this.avControlObject.data || this.avControlObject.getAttribute('data') || '';
+                const guardedData = this.avControlObject.__openhbbtvOriginalDataAttribute || '';
+                const rawData = this.avControlObject.getAttribute ? (this.avControlObject.getAttribute('data') || '') : '';
+                if (guardedData && rawData === 'about:blank') {
+                    if (this.originalDataAttribute !== guardedData) {
+                        this.originalDataAttribute = guardedData;
+                        if (window.signalopenhbbtvbrowser) {
+                            window.signalopenhbbtvbrowser("LOG:AVControl#" + this.avControlId + " data guarded, no mutation rewrite data=" + guardedData);
+                        }
+                    }
+                    return;
+                }
+                const currentData = guardedData || this.avControlObject.data || rawData || '';
                 if (currentData && currentData !== "about:blank") {
                     const changed = this.originalDataAttribute !== currentData;
                     this.originalDataAttribute = currentData;
-                    this.avControlObject.data = "about:blank";
+                    this.avControlObject.__openhbbtvOriginalDataAttribute = currentData;
+                    if (rawData !== 'about:blank' && !this.avControlObject.__openhbbtvDataBlanked) {
+                        this.avControlObject.__openhbbtvDataBlanked = true;
+                        try {
+                            this.avControlObject.setAttribute('data', 'about:blank');
+                        } catch (ignoreBlank) {
+                        }
+                    }
                     if (changed) {
                         if (window.signalopenhbbtvbrowser) {
                             window.signalopenhbbtvbrowser("LOG:AVControl#" + this.avControlId + " data changed without autostart fallback data=" + currentData);
@@ -31950,9 +31980,18 @@ class OipfVideoBroadcastMapper {
                             }
                         }
                         if (tag === 'object' && (attrName === 'data' || attrName === 'type')) {
-                            var objectUrl = absoluteUrl(target.__openhbbtvOriginalDataAttribute || target.data || target.getAttribute('data') || '');
+                            var rawObjectData = target.getAttribute ? (target.getAttribute('data') || '') : '';
+                            var objectUrl = absoluteUrl(target.__openhbbtvOriginalDataAttribute || rawObjectData || target.data || '');
+                            if (target.__openhbbtvOriginalDataAttribute && rawObjectData === 'about:blank') {
+                                return;
+                            }
                             if (rememberObjectMedia(target, objectUrl, 'mutation-object-' + attrName)) {
-                                try { target.setAttribute('data', 'about:blank'); } catch (ignoreBlank) {}
+                                try {
+                                    if (rawObjectData !== 'about:blank' && !target.__openhbbtvDataBlanked) {
+                                        target.__openhbbtvDataBlanked = true;
+                                        target.setAttribute('data', 'about:blank');
+                                    }
+                                } catch (ignoreBlank) {}
                             }
                         }
                     }
