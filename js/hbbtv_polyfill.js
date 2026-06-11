@@ -29996,6 +29996,51 @@ class OipfAVControlMapper {
             this.avControlObject.dispatchEvent(playerEvent);
         };
 
+        const scheduleAutoStartAfterDataChange = (reason) => {
+            if (!this.isDashVideo) {
+                return;
+            }
+            window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
+            const ns = window.HBBTV_POLYFILL_NS;
+            const lastBroadcastStopAt = ns.lastBroadcastStopAt || 0;
+            const now = Date.now();
+            if (!lastBroadcastStopAt || now - lastBroadcastStopAt > 4000) {
+                return;
+            }
+            const streamUrl = this.originalDataAttribute || '';
+            if (!streamUrl || streamUrl === 'about:blank') {
+                return;
+            }
+            if (this._autoStartTimer) {
+                window.clearTimeout(this._autoStartTimer);
+                this._autoStartTimer = null;
+            }
+            send("LOG:AVControl schedule auto PLAY_STREAM after data change " + reason);
+            this._autoStartTimer = window.setTimeout(() => {
+                this._autoStartTimer = null;
+                const currentUrl = this.originalDataAttribute || '';
+                if (!currentUrl || currentUrl === 'about:blank') {
+                    send("LOG:AVControl auto PLAY_STREAM skipped without data");
+                    return;
+                }
+                if (this.avControlObject.playState === PLAY_STATES.connecting || this.avControlObject.playState === PLAY_STATES.playing) {
+                    send("LOG:AVControl auto PLAY_STREAM skipped state " + this.avControlObject.playState);
+                    return;
+                }
+                const currentNow = Date.now();
+                if (this._lastAutoStartedUrl === currentUrl && currentNow - (this._lastAutoStartAt || 0) < 2500) {
+                    send("LOG:AVControl auto PLAY_STREAM skipped duplicate");
+                    return;
+                }
+                this._lastAutoStartedUrl = currentUrl;
+                this._lastAutoStartAt = currentNow;
+                this.avControlObject.speed = 1;
+                send("LOG:AVControl auto PLAY_STREAM after data change");
+                send("PLAY_STREAM:" + currentUrl);
+                dispatchPlayState(PLAY_STATES.connecting);
+            }, 700);
+        };
+
         const updateOriginalDataAttribute = () => {
             const currentData = this.avControlObject.data || this.avControlObject.getAttribute('data') || '';
             if (currentData && currentData !== 'about:blank') {
@@ -30056,6 +30101,7 @@ class OipfAVControlMapper {
                 if (currentData && currentData !== "about:blank") {
                     this.originalDataAttribute = currentData;
                     this.avControlObject.data = "about:blank";
+                    scheduleAutoStartAfterDataChange("data mutation");
                 }
             }
         };
@@ -31001,6 +31047,8 @@ class OipfVideoBroadcastMapper {
         };
         oipfPluginObject.stop = function () {
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo stop() ...');
+            window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
+            window.HBBTV_POLYFILL_NS.lastBroadcastStopAt = Date.now();
             send("BROADCAST_STOP");
             send("UNSET_VIDEO_WINDOW");
             dispatchPlayState(0);
@@ -31008,6 +31056,8 @@ class OipfVideoBroadcastMapper {
         };
         oipfPluginObject.release = function () {
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo release() ...');
+            window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
+            window.HBBTV_POLYFILL_NS.lastBroadcastStopAt = Date.now();
             send("BROADCAST_STOP");
             send("UNSET_VIDEO_WINDOW");
             dispatchPlayState(0);
