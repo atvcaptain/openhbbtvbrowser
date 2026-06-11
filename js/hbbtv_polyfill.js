@@ -29952,8 +29952,45 @@ class OipfAVControlMapper {
 
         window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
         window.HBBTV_POLYFILL_NS.avControlObjects = window.HBBTV_POLYFILL_NS.avControlObjects || [];
+        window.HBBTV_POLYFILL_NS.avControlCounter = window.HBBTV_POLYFILL_NS.avControlCounter || 0;
+        this.avControlId = ++window.HBBTV_POLYFILL_NS.avControlCounter;
+        this.avControlObject.__openhbbtvAvControlId = this.avControlId;
         if (window.HBBTV_POLYFILL_NS.avControlObjects.indexOf(this.avControlObject) < 0) {
             window.HBBTV_POLYFILL_NS.avControlObjects.push(this.avControlObject);
+        }
+        if (!window.HBBTV_POLYFILL_NS.keyTraceInstalled && window.addEventListener) {
+            window.HBBTV_POLYFILL_NS.keyTraceInstalled = true;
+            window.HBBTV_POLYFILL_NS.lastKeyEvent = null;
+            var openhbbtvDescribeTarget = function (target) {
+                try {
+                    if (!target) {
+                        return "null";
+                    }
+                    var tag = target.tagName || target.nodeName || typeof target;
+                    var id = target.id ? ("#" + target.id) : "";
+                    var cls = target.className ? ("." + String(target.className).replace(/\s+/g, ".").slice(0, 80)) : "";
+                    return tag + id + cls;
+                } catch (ignore) {
+                    return "unknown";
+                }
+            };
+            var openhbbtvKeyLogger = function (event) {
+                var info = {
+                    type: event.type,
+                    key: event.key || "",
+                    code: event.code || "",
+                    which: event.which || event.keyCode || 0,
+                    time: Date.now(),
+                    target: openhbbtvDescribeTarget(event.target),
+                    active: openhbbtvDescribeTarget(document.activeElement)
+                };
+                window.HBBTV_POLYFILL_NS.lastKeyEvent = info;
+                if (window.signalopenhbbtvbrowser && (info.which === 13 || info.key === "Enter" || info.key === "OK")) {
+                    window.signalopenhbbtvbrowser("LOG:AVInput " + info.type + " key=" + info.key + " code=" + info.code + " which=" + info.which + " target=" + info.target + " active=" + info.active);
+                }
+            };
+            window.addEventListener("keydown", openhbbtvKeyLogger, true);
+            window.addEventListener("keyup", openhbbtvKeyLogger, true);
         }
         window.HBBTV_POLYFILL_NS.setStreamState = function (state, error) {
             var objects = window.HBBTV_POLYFILL_NS.avControlObjects || [];
@@ -29987,8 +30024,38 @@ class OipfAVControlMapper {
                 window.signalopenhbbtvbrowser(command);
             }
         };
-        const dispatchPlayState = (state) => {
+        const describeElement = (target) => {
+            try {
+                if (!target) {
+                    return "null";
+                }
+                const tag = target.tagName || target.nodeName || typeof target;
+                const id = target.id ? ("#" + target.id) : "";
+                const cls = target.className ? ("." + String(target.className).replace(/\s+/g, ".").slice(0, 80)) : "";
+                return tag + id + cls;
+            } catch (ignore) {
+                return "unknown";
+            }
+        };
+
+        const lastKeySummary = () => {
+            const ns = window.HBBTV_POLYFILL_NS || {};
+            const info = ns.lastKeyEvent;
+            if (!info) {
+                return "none";
+            }
+            return info.type + ":" + info.key + ":" + info.which + ":age=" + (Date.now() - info.time) + "ms:target=" + info.target + ":active=" + info.active;
+        };
+
+        const trace = (message) => {
+            send("LOG:AVControl#" + this.avControlId + " " + message + " state=" + this.avControlObject.playState + " speed=" + this.avControlObject.speed + " active=" + describeElement(document.activeElement) + " lastKey=" + lastKeySummary());
+        };
+
+        trace("constructor dash=" + !!this.isDashVideo + " originalData=" + (this.originalDataAttribute || ""));
+
+        const dispatchPlayState = (state, reason) => {
             this.avControlObject.playState = state;
+            trace("PlayStateChange -> " + state + " reason=" + (reason || ""));
             var playerEvent = new Event('PlayStateChange');
             playerEvent.state = state;
             if (this.avControlObject.onPlayStateChange) {
@@ -30028,8 +30095,9 @@ class OipfAVControlMapper {
         this.avControlObject.play = (speed) => {
             if (speed === 0) {
                 this.avControlObject.speed = 0;
+                trace("play(0) -> PAUSE_STREAM");
                 send("PAUSE_STREAM");
-                dispatchPlayState(PLAY_STATES.paused);
+                dispatchPlayState(PLAY_STATES.paused, "play(0)");
             } else if (speed > 0) {
                 const streamUrl = updateOriginalDataAttribute();
                 this.avControlObject.speed = speed;
@@ -30037,9 +30105,10 @@ class OipfAVControlMapper {
                     send("LOG:AVControl.play ignored without data");
                     return false;
                 }
+                trace("play(" + speed + ") -> PLAY_STREAM url=" + streamUrl);
                 markPlayStreamSent(streamUrl, "play speed " + speed);
                 send("PLAY_STREAM:" + streamUrl);
-                dispatchPlayState(PLAY_STATES.connecting);
+                dispatchPlayState(PLAY_STATES.connecting, "play(" + speed + ")");
             } else if (speed < 0) {
                 const streamUrl = updateOriginalDataAttribute();
                 this.avControlObject.speed = speed;
@@ -30047,17 +30116,19 @@ class OipfAVControlMapper {
                     send("LOG:AVControl.play ignored without data");
                     return false;
                 }
+                trace("play(" + speed + ") -> PLAY_STREAM url=" + streamUrl);
                 markPlayStreamSent(streamUrl, "play speed " + speed);
                 send("PLAY_STREAM:" + streamUrl);
-                dispatchPlayState(PLAY_STATES.connecting);
+                dispatchPlayState(PLAY_STATES.connecting, "play(" + speed + ")");
             }
             return true;
         };
         this.avControlObject.stop = () => {
+            trace("stop() -> STOP_STREAM");
             send("STOP_STREAM");
             this.avControlObject.playPosition = 0;
             this.avControlObject.speed = 0;
-            dispatchPlayState(PLAY_STATES.stopped);
+            dispatchPlayState(PLAY_STATES.stopped, "stop()");
             return true;
         };
         this.avControlObject.seek = (posInMs) => {
@@ -30080,7 +30151,9 @@ class OipfAVControlMapper {
                     this.originalDataAttribute = currentData;
                     this.avControlObject.data = "about:blank";
                     if (changed) {
-                        send("LOG:AVControl data changed without autostart fallback");
+                        if (window.signalopenhbbtvbrowser) {
+                            window.signalopenhbbtvbrowser("LOG:AVControl#" + this.avControlId + " data changed without autostart fallback data=" + currentData);
+                        }
                     }
                 }
             }
