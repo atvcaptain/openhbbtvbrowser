@@ -58,6 +58,7 @@ private:
     void refreshApplicationAfterTeletextReturn();
     bool shouldForceNativeVisibleRefresh(const QString &reason) const;
     void forceNativeVisibleRefresh(QWidget *top, const QString &reason);
+    void retryStreamOverlayVisible(const QString &reason, int delayMs);
     bool isInitialUrl(const QUrl &candidate) const;
     void injectKeyEvent(int keyCode);
     bool nativeNavigationKeysEnabled() const;

@@ -15,6 +15,7 @@
 #include <QWidget>
 #include <QDateTime>
 #include <QCoreApplication>
+#include <QPointer>
 
 WebView::WebView(QWidget *parent)
     : QWebEngineView(parent)
@@ -236,6 +237,37 @@ void WebView::forceNativeVisibleRefresh(QWidget *top, const QString &reason)
     qDebug() << "[OpenHbbTV] native visible refresh done" << reason << top->geometry() << "visible" << top->isVisible();
 }
 
+void WebView::retryStreamOverlayVisible(const QString &reason, int delayMs)
+{
+    if (!isStreamActive())
+        return;
+
+    QPointer<QWidget> top = window();
+    QTimer::singleShot(delayMs, this, [this, top, reason, delayMs]() {
+        if (!top || !isStreamActive() || !m_streamOverlayVisible) {
+            qDebug() << "[OpenHbbTV] skip stream overlay native show retry" << delayMs << reason
+                     << "top" << static_cast<bool>(top) << "stream" << isStreamActive()
+                     << "overlay" << m_streamOverlayVisible;
+            return;
+        }
+
+        if (m_streamOverlayGeometryValid)
+            top->setGeometry(m_streamOverlaySavedGeometry);
+
+        qDebug() << "[OpenHbbTV] stream overlay native show retry" << delayMs << reason
+                 << top->geometry() << "visible" << top->isVisible();
+        top->showFullScreen();
+        top->raise();
+        top->activateWindow();
+        show();
+        setFocus(Qt::OtherFocusReason);
+        repaint();
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
+        qDebug() << "[OpenHbbTV] stream overlay native show retry done" << delayMs << reason
+                 << top->geometry() << "visible" << top->isVisible();
+    });
+}
+
 void WebView::showApplicationOverlay(const QString &reason)
 {
     m_streamOverlayVisible = true;
@@ -266,6 +298,11 @@ void WebView::showApplicationOverlay(const QString &reason)
             qDebug() << "[OpenHbbTV] refresh visible browser window for overlay" << reason << top->geometry() << "visible" << top->isVisible();
         }
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
+    }
+    if (isStreamActive() && reason.toLower().contains(QStringLiteral("stream"))) {
+        retryStreamOverlayVisible(reason, 120);
+        retryStreamOverlayVisible(reason, 450);
+        retryStreamOverlayVisible(reason, 900);
     }
     page()->runJavaScript(QString::fromLatin1(
         "(function() {"
