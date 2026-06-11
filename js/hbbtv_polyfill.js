@@ -31325,4 +31325,443 @@ class OipfVideoBroadcastMapper {
 /***/ })
 
 /******/ });
+// OpenHbbTV HTML5/VOD bridge.
+// Some HbbTV portals (for example ARD yellow-button VOD) use an HTML5
+// video/MSE path instead of OIPF AVControl.  On embedded E2 boxes QtWebEngine
+// video rendering can be slow or broken, so clear non-DRM manifest playback is
+// routed to the E2 backend with the same PLAY_STREAM command used by AVControl.
+(function () {
+    if (typeof window !== 'object' || typeof document !== 'object') {
+        return;
+    }
+    window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
+    var ns = window.HBBTV_POLYFILL_NS;
+    if (ns.html5VodBridgeInstalled) {
+        return;
+    }
+    ns.html5VodBridgeInstalled = true;
+    ns.html5VodLastManifestUrl = '';
+    ns.html5VodLastManifestAt = 0;
+    ns.html5VodLastManifestSource = '';
+    ns.html5VodLastRoutedUrl = '';
+    ns.html5VodLastRoutedAt = 0;
+    ns.html5VodPendingPlayAt = 0;
+
+    function send(command) {
+        try {
+            if (window.signalopenhbbtvbrowser) {
+                window.signalopenhbbtvbrowser(command);
+            }
+        } catch (ignore) {
+        }
+    }
+
+    function log(message) {
+        send('LOG:HTML5VOD ' + message);
+    }
+
+    function absoluteUrl(url) {
+        try {
+            if (!url) {
+                return '';
+            }
+            if (typeof url !== 'string') {
+                url = String(url);
+            }
+            if (!url || url === 'about:blank' || url.indexOf('blob:') === 0 || url.indexOf('data:') === 0) {
+                return url;
+            }
+            return new URL(url, document.baseURI || window.location.href).href;
+        } catch (ignore) {
+            return url || '';
+        }
+    }
+
+    function requestUrl(input) {
+        try {
+            if (!input) {
+                return '';
+            }
+            if (typeof input === 'string') {
+                return input;
+            }
+            if (input.url) {
+                return input.url;
+            }
+            return String(input);
+        } catch (ignore) {
+            return '';
+        }
+    }
+
+    function isManifestUrl(url) {
+        url = absoluteUrl(url);
+        if (!url || url.indexOf('blob:') === 0 || url.indexOf('data:') === 0) {
+            return false;
+        }
+        var clean = url.split('#')[0].split('?')[0].toLowerCase();
+        return clean.lastIndexOf('.mpd') === clean.length - 4 || clean.lastIndexOf('.m3u8') === clean.length - 5;
+    }
+
+    function looksLikeDrmManifest(text) {
+        if (!text) {
+            return false;
+        }
+        text = String(text).toLowerCase();
+        return text.indexOf('contentprotection') >= 0 ||
+            text.indexOf('widevine') >= 0 ||
+            text.indexOf('playready') >= 0 ||
+            text.indexOf('com.widevine') >= 0 ||
+            text.indexOf('cenc:default_kid') >= 0 ||
+            text.indexOf('urn:mpeg:dash:mp4protection') >= 0;
+    }
+
+    function pageLooksLikeVodPlayback() {
+        try {
+            var href = String(window.location.href || '').toLowerCase();
+            return href.indexOf('selectoverride=video') >= 0 ||
+                href.indexOf('/video/') >= 0 ||
+                href.indexOf('ardmediathek') >= 0 && href.indexOf('video') >= 0;
+        } catch (ignore) {
+            return false;
+        }
+    }
+
+    function findVideoUrl(video) {
+        try {
+            if (!video) {
+                return '';
+            }
+            var direct = video.currentSrc || video.src || video.getAttribute && video.getAttribute('src') || '';
+            if (isManifestUrl(direct)) {
+                return absoluteUrl(direct);
+            }
+            var sources = video.querySelectorAll ? video.querySelectorAll('source[src]') : [];
+            for (var i = 0; i < sources.length; i++) {
+                var sourceUrl = sources[i].src || sources[i].getAttribute('src') || '';
+                if (isManifestUrl(sourceUrl)) {
+                    return absoluteUrl(sourceUrl);
+                }
+            }
+        } catch (ignore) {
+        }
+        return '';
+    }
+
+    function blockNativeVideo(video, reason) {
+        try {
+            var videos = [];
+            if (video && video.tagName && String(video.tagName).toLowerCase() === 'video') {
+                videos.push(video);
+            }
+            var allVideos = document.querySelectorAll ? document.querySelectorAll('video') : [];
+            for (var i = 0; i < allVideos.length; i++) {
+                if (videos.indexOf(allVideos[i]) < 0) {
+                    videos.push(allVideos[i]);
+                }
+            }
+            videos.forEach(function (item) {
+                try {
+                    item.pause();
+                } catch (ignorePause) {
+                }
+                try {
+                    item.removeAttribute('src');
+                    item.src = '';
+                } catch (ignoreSrc) {
+                }
+                try {
+                    var sources = item.querySelectorAll ? item.querySelectorAll('source[src]') : [];
+                    for (var j = 0; j < sources.length; j++) {
+                        sources[j].removeAttribute('src');
+                    }
+                } catch (ignoreSources) {
+                }
+                try {
+                    item.load();
+                } catch (ignoreLoad) {
+                }
+                try {
+                    item.style.background = 'transparent';
+                    item.style.opacity = '0';
+                    item.style.visibility = 'hidden';
+                } catch (ignoreStyle) {
+                }
+            });
+            log('native video blocked reason=' + reason + ' count=' + videos.length);
+        } catch (error) {
+            log('native video block failed reason=' + reason + ' error=' + error);
+        }
+    }
+
+    function routeManifestToE2(url, reason, video, manifestText) {
+        url = absoluteUrl(url);
+        if (!isManifestUrl(url)) {
+            return false;
+        }
+        if (looksLikeDrmManifest(manifestText)) {
+            log('manifest has DRM markers, keep Qt path url=' + url + ' reason=' + reason);
+            return false;
+        }
+        var now = Date.now();
+        if (ns.html5VodLastRoutedUrl === url && (now - ns.html5VodLastRoutedAt) < 2500) {
+            log('skip duplicate route url=' + url + ' reason=' + reason);
+            return true;
+        }
+        ns.html5VodLastRoutedUrl = url;
+        ns.html5VodLastRoutedAt = now;
+        ns.html5VodE2Active = true;
+        log('route to E2 reason=' + reason + ' url=' + url + ' page=' + window.location.href);
+        blockNativeVideo(video, reason);
+        send('PLAY_STREAM:' + url);
+        window.setTimeout(function () {
+            blockNativeVideo(video, reason + ' delayed');
+        }, 150);
+        window.setTimeout(function () {
+            blockNativeVideo(video, reason + ' delayed2');
+        }, 600);
+        return true;
+    }
+
+    function rememberManifestUrl(url, source, manifestText) {
+        url = absoluteUrl(url);
+        if (!isManifestUrl(url)) {
+            return;
+        }
+        ns.html5VodLastManifestUrl = url;
+        ns.html5VodLastManifestAt = Date.now();
+        ns.html5VodLastManifestSource = source || '';
+        log('manifest seen source=' + source + ' url=' + url + ' vodPage=' + pageLooksLikeVodPlayback());
+        if (pageLooksLikeVodPlayback() || (Date.now() - (ns.html5VodPendingPlayAt || 0)) < 6000) {
+            routeManifestToE2(url, 'manifest ' + source, null, manifestText);
+        }
+    }
+
+    function lastRecentManifestUrl() {
+        if (ns.html5VodLastManifestUrl && (Date.now() - ns.html5VodLastManifestAt) < 15000) {
+            return ns.html5VodLastManifestUrl;
+        }
+        return '';
+    }
+
+    function installFetchInterceptor() {
+        if (!window.fetch || ns.html5VodFetchPatched) {
+            return;
+        }
+        ns.html5VodFetchPatched = true;
+        var nativeFetch = window.fetch;
+        window.fetch = function (input, init) {
+            var url = absoluteUrl(requestUrl(input));
+            var result = nativeFetch.apply(this, arguments);
+            if (isManifestUrl(url)) {
+                try {
+                    return result.then(function (response) {
+                        try {
+                            response.clone().text().then(function (text) {
+                                rememberManifestUrl(url, 'fetch', text);
+                            }).catch(function () {
+                                rememberManifestUrl(url, 'fetch');
+                            });
+                        } catch (ignoreClone) {
+                            rememberManifestUrl(url, 'fetch');
+                        }
+                        return response;
+                    });
+                } catch (ignoreThen) {
+                    rememberManifestUrl(url, 'fetch');
+                }
+            }
+            return result;
+        };
+        log('fetch interceptor installed');
+    }
+
+    function installXhrInterceptor() {
+        if (!window.XMLHttpRequest || ns.html5VodXhrPatched) {
+            return;
+        }
+        ns.html5VodXhrPatched = true;
+        var nativeOpen = window.XMLHttpRequest.prototype.open;
+        window.XMLHttpRequest.prototype.open = function (method, url) {
+            this.__openhbbtvManifestUrl = absoluteUrl(url || '');
+            return nativeOpen.apply(this, arguments);
+        };
+        var nativeSend = window.XMLHttpRequest.prototype.send;
+        window.XMLHttpRequest.prototype.send = function () {
+            var xhr = this;
+            var url = xhr.__openhbbtvManifestUrl || '';
+            if (isManifestUrl(url)) {
+                try {
+                    xhr.addEventListener('load', function () {
+                        var text = '';
+                        try {
+                            if (typeof xhr.responseText === 'string') {
+                                text = xhr.responseText;
+                            }
+                        } catch (ignoreText) {
+                        }
+                        rememberManifestUrl(url, 'xhr', text);
+                    }, false);
+                    xhr.addEventListener('error', function () {
+                        rememberManifestUrl(url, 'xhr-error');
+                    }, false);
+                } catch (ignoreListener) {
+                    rememberManifestUrl(url, 'xhr-open');
+                }
+            }
+            return nativeSend.apply(this, arguments);
+        };
+        log('xhr interceptor installed');
+    }
+
+    function installVideoInterceptor() {
+        if (!window.HTMLMediaElement || ns.html5VodVideoPatched) {
+            return;
+        }
+        ns.html5VodVideoPatched = true;
+        var mediaProto = window.HTMLMediaElement.prototype;
+        var nativePlay = mediaProto.play;
+        var nativeLoad = mediaProto.load;
+        var nativeSetAttribute = window.Element && window.Element.prototype && window.Element.prototype.setAttribute;
+        var srcDescriptor = Object.getOwnPropertyDescriptor(mediaProto, 'src');
+
+        mediaProto.play = function () {
+            var tag = this.tagName ? String(this.tagName).toLowerCase() : '';
+            if (tag === 'video') {
+                ns.html5VodPendingPlayAt = Date.now();
+                var url = findVideoUrl(this) || lastRecentManifestUrl();
+                log('video.play tag=' + tag + ' src=' + (this.currentSrc || this.src || '') + ' manifest=' + url + ' page=' + window.location.href);
+                if (url && routeManifestToE2(url, 'video.play', this)) {
+                    return Promise.resolve();
+                }
+            }
+            return nativePlay ? nativePlay.apply(this, arguments) : undefined;
+        };
+
+        mediaProto.load = function () {
+            var tag = this.tagName ? String(this.tagName).toLowerCase() : '';
+            if (tag === 'video') {
+                var url = findVideoUrl(this);
+                if (url) {
+                    log('video.load manifest=' + url);
+                    if (pageLooksLikeVodPlayback()) {
+                        routeManifestToE2(url, 'video.load', this);
+                    }
+                }
+            }
+            return nativeLoad ? nativeLoad.apply(this, arguments) : undefined;
+        };
+
+        if (srcDescriptor && srcDescriptor.set && srcDescriptor.get) {
+            try {
+                Object.defineProperty(mediaProto, 'src', {
+                    enumerable: srcDescriptor.enumerable,
+                    configurable: true,
+                    get: function () {
+                        return srcDescriptor.get.call(this);
+                    },
+                    set: function (value) {
+                        var url = absoluteUrl(value || '');
+                        if (this.tagName && String(this.tagName).toLowerCase() === 'video' && isManifestUrl(url)) {
+                            log('video.src set manifest=' + url);
+                            if (pageLooksLikeVodPlayback()) {
+                                routeManifestToE2(url, 'video.src', this);
+                                value = '';
+                            }
+                        }
+                        return srcDescriptor.set.call(this, value);
+                    }
+                });
+            } catch (error) {
+                log('video.src patch failed error=' + error);
+            }
+        }
+
+        if (nativeSetAttribute) {
+            window.Element.prototype.setAttribute = function (name, value) {
+                try {
+                    var tag = this.tagName ? String(this.tagName).toLowerCase() : '';
+                    if (String(name).toLowerCase() === 'src' && (tag === 'video' || tag === 'source')) {
+                        var url = absoluteUrl(value || '');
+                        if (isManifestUrl(url)) {
+                            log(tag + '.setAttribute src manifest=' + url);
+                            rememberManifestUrl(url, tag + '.setAttribute');
+                            if (pageLooksLikeVodPlayback()) {
+                                var video = tag === 'video' ? this : (this.parentNode && this.parentNode.tagName && String(this.parentNode.tagName).toLowerCase() === 'video' ? this.parentNode : null);
+                                routeManifestToE2(url, tag + '.setAttribute', video);
+                                value = '';
+                            }
+                        }
+                    }
+                } catch (ignore) {
+                }
+                return nativeSetAttribute.call(this, name, value);
+            };
+        }
+        log('video interceptor installed');
+    }
+
+    function installMutationObserver() {
+        if (!window.MutationObserver || ns.html5VodMutationObserverInstalled) {
+            return;
+        }
+        ns.html5VodMutationObserverInstalled = true;
+        var observer = new MutationObserver(function (mutations) {
+            mutations.forEach(function (mutation) {
+                try {
+                    if (mutation.type === 'attributes' && String(mutation.attributeName).toLowerCase() === 'src') {
+                        var target = mutation.target;
+                        var tag = target.tagName ? String(target.tagName).toLowerCase() : '';
+                        if (tag === 'video' || tag === 'source') {
+                            var url = absoluteUrl(target.src || target.getAttribute('src') || '');
+                            if (isManifestUrl(url)) {
+                                log('mutation src tag=' + tag + ' manifest=' + url);
+                                rememberManifestUrl(url, 'mutation-' + tag);
+                            }
+                        }
+                    }
+                    if (mutation.addedNodes && mutation.addedNodes.length) {
+                        Array.prototype.forEach.call(mutation.addedNodes, function (node) {
+                            if (!node || !node.querySelectorAll) {
+                                return;
+                            }
+                            var sources = node.querySelectorAll('video[src],source[src]');
+                            Array.prototype.forEach.call(sources, function (source) {
+                                var url = absoluteUrl(source.src || source.getAttribute('src') || '');
+                                if (isManifestUrl(url)) {
+                                    log('added ' + source.tagName + ' manifest=' + url);
+                                    rememberManifestUrl(url, 'added-' + source.tagName);
+                                }
+                            });
+                        });
+                    }
+                } catch (ignore) {
+                }
+            });
+        });
+        function start() {
+            if (document.documentElement) {
+                observer.observe(document.documentElement, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ['src']
+                });
+                log('mutation observer installed');
+            }
+        }
+        if (document.documentElement) {
+            start();
+        } else {
+            document.addEventListener('DOMContentLoaded', start, false);
+        }
+    }
+
+    installFetchInterceptor();
+    installXhrInterceptor();
+    installVideoInterceptor();
+    installMutationObserver();
+    log('bridge installed page=' + window.location.href);
+}());
+
 //# sourceMappingURL=hbbtv_polyfill.js.map
