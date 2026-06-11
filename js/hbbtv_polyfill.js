@@ -31236,6 +31236,23 @@ class OipfVideoBroadcastMapper {
             send("NEXT_CHANNEL");
             return currentChannel;
         };
+        const dispatchStoppedAsync = (reason) => {
+            // Some HbbTV applications treat BroadcastVideo.stop()/release() as asynchronous.
+            // Fire the stopped PlayStateChange more than once so handlers installed after the
+            // stop/release call still see the stopped transition.
+            dispatchPlayState(0);
+            [120, 350, 800].forEach(function (delay) {
+                window.setTimeout(function () {
+                    send("LOG:AVTRACE BROADCAST async stopped event reason=" + reason + " delay=" + delay +
+                        " focus=" + (window.__openatvDescribeElement ? window.__openatvDescribeElement(document.activeElement) : 'n/a'));
+                    dispatchPlayState(0);
+                    if (typeof window.HBBTV_POLYFILL_NS.probePendingAvControlAutoStart === 'function') {
+                        window.HBBTV_POLYFILL_NS.probePendingAvControlAutoStart(reason + " async stopped " + delay);
+                    }
+                }, delay);
+            });
+        };
+
         oipfPluginObject.stop = function () {
             send("LOG:AVTRACE BROADCAST stop called focus=" + (window.__openatvDescribeElement ? window.__openatvDescribeElement(document.activeElement) : 'n/a'));
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo stop() ...');
@@ -31248,7 +31265,7 @@ class OipfVideoBroadcastMapper {
             }
             send("BROADCAST_STOP");
             send("UNSET_VIDEO_WINDOW");
-            dispatchPlayState(0);
+            dispatchStoppedAsync("stop");
             return true;
         };
         oipfPluginObject.release = function () {
@@ -31263,7 +31280,7 @@ class OipfVideoBroadcastMapper {
             }
             send("BROADCAST_STOP");
             send("UNSET_VIDEO_WINDOW");
-            dispatchPlayState(0);
+            dispatchStoppedAsync("release");
         };
         startVideoWindowObserver();
         function ChannelConfig() {
