@@ -32162,13 +32162,18 @@ class OipfVideoBroadcastMapper {
 }());
 
 
-// Central OpenHbbTV key broker used by the C++ side.  Dispatch to a stable
-// DOM target instead of guessing the current activeElement after browser hide/show.
+// Central OpenHbbTV key broker used by the C++ side.
+//
+// Important: this is deliberately legacy-compatible with the pre-refactor
+// injection path. Some HbbTV pages do not react to modern key names like
+// "Yellow" even though keyCode/which is 405. The old path used Arrow* key names
+// for the four colour buttons while keeping the HbbTV virtual keyCode. Keep
+// that behaviour here and only centralise target selection / logging.
 (function () {
     if (typeof window !== 'object' || typeof document !== 'object') {
         return;
     }
-    if (window.__openhbbtvInjectKey) {
+    if (window.__openhbbtvInjectKey && window.__openhbbtvInjectKey.__openhbbtvBrokerVersion >= 2) {
         return;
     }
     function send(command) {
@@ -32179,21 +32184,17 @@ class OipfVideoBroadcastMapper {
         } catch (ignore) {
         }
     }
-    function keyName(value) {
+    function legacyKeyName(value, vkName) {
         if (value >= 48 && value <= 57) { return String.fromCharCode(value); }
         if (value === 13) { return 'Enter'; }
-        if (value === 37) { return 'ArrowLeft'; }
-        if (value === 38) { return 'ArrowUp'; }
-        if (value === 39) { return 'ArrowRight'; }
-        if (value === 40) { return 'ArrowDown'; }
-        if (value === 403) { return 'Red'; }
-        if (value === 404) { return 'Green'; }
-        if (value === 405) { return 'Yellow'; }
-        if (value === 406) { return 'Blue'; }
+        if (value === 37 || value === 403) { return 'ArrowLeft'; }
+        if (value === 38 || value === 404) { return 'ArrowUp'; }
+        if (value === 39 || value === 405) { return 'ArrowRight'; }
+        if (value === 40 || value === 406) { return 'ArrowDown'; }
         if (value === 461) { return 'Backspace'; }
         if (value === 413) { return 'Stop'; }
         if (value === 415) { return 'Play'; }
-        return String(value);
+        return vkName || String(value);
     }
     function describe(target) {
         try {
@@ -32206,38 +32207,80 @@ class OipfVideoBroadcastMapper {
             return 'unknown';
         }
     }
+    function resolveCode(code, vkName) {
+        var resolved = parseInt(code, 10) || 0;
+        try {
+            if (vkName && typeof window[vkName] !== 'undefined') {
+                resolved = parseInt(window[vkName], 10) || resolved;
+            }
+        } catch (ignore) {
+        }
+        return resolved;
+    }
+    function resolveTarget() {
+        var active = null;
+        try { active = document.activeElement; } catch (ignoreActive) {}
+        if (active && active !== document && active !== document.documentElement) {
+            return active;
+        }
+        return document.body || document.documentElement || active || document;
+    }
     function makeEvent(type, code, vkName) {
-        var key = keyName(code);
-        var e = new KeyboardEvent(type, {
-            bubbles: true,
-            cancelable: true,
-            composed: true,
-            key: key,
-            code: vkName || key,
-            keyCode: code,
-            which: code
-        });
+        var key = legacyKeyName(code, vkName);
+        var e;
+        try {
+            e = new KeyboardEvent(type, {
+                bubbles: true,
+                cancelable: true,
+                composed: true,
+                key: key,
+                code: vkName || key,
+                keyCode: code,
+                which: code
+            });
+        } catch (newEventError) {
+            e = document.createEvent('KeyboardEvent');
+            try {
+                e.initKeyboardEvent(type, true, true, window, key, 0, '', false, '');
+            } catch (initKeyboardError) {
+                try { e.initKeyEvent(type, true, true, window, false, false, false, false, code, 0); } catch (ignore) {}
+            }
+        }
+        try { Object.defineProperty(e, 'key', { value: key }); } catch (ignoreKey) {}
+        try { Object.defineProperty(e, 'code', { value: vkName || key }); } catch (ignoreCode) {}
         try { Object.defineProperty(e, 'keyCode', { value: code }); } catch (ignoreKeyCode) {}
         try { Object.defineProperty(e, 'which', { value: code }); } catch (ignoreWhich) {}
         try { Object.defineProperty(e, 'charCode', { value: 0 }); } catch (ignoreCharCode) {}
         return e;
     }
-    window.__openhbbtvInjectKey = function (code, vkName) {
-        code = parseInt(code, 10) || 0;
-        var target = document.body || document.documentElement || document;
+    function dispatchPair(target, code, vkName) {
+        var key = legacyKeyName(code, vkName);
+        var downResult = true;
         try {
-            if (target && target.focus) {
-                target.focus();
-            }
-        } catch (ignoreFocus) {
+            downResult = target.dispatchEvent(makeEvent('keydown', code, vkName));
+        } catch (e1) {
+            send('LOG:InjectedKey keydown failed target=' + describe(target) + ' error=' + e1);
         }
-        send('LOG:InjectedKey broker target=' + describe(target) + ' active=' + describe(document.activeElement) + ' key=' + code + ' vk=' + (vkName || ''));
-        try { target.dispatchEvent(makeEvent('keydown', code, vkName)); } catch (e1) { send('LOG:InjectedKey keydown failed ' + e1); }
         window.setTimeout(function () {
-            try { target.dispatchEvent(makeEvent('keyup', code, vkName)); } catch (e2) { send('LOG:InjectedKey keyup failed ' + e2); }
+            try { target.dispatchEvent(makeEvent('keyup', code, vkName)); }
+            catch (e2) { send('LOG:InjectedKey keyup failed target=' + describe(target) + ' error=' + e2); }
         }, 25);
+        send('LOG:InjectedKey broker v2 target=' + describe(target) + ' active=' + describe(document.activeElement) + ' key=' + code + ' vk=' + (vkName || '') + ' legacyKey=' + key + ' accepted=' + (!!downResult));
+    }
+    window.__openhbbtvInjectKey = function (code, vkName) {
+        var resolved = resolveCode(code, vkName);
+        var target = resolveTarget();
+        try {
+            if (window.focus) { window.focus(); }
+        } catch (ignoreWindowFocus) {
+        }
+        // Do not blindly focus document.body before dispatching. The pre-refactor
+        // path selected activeElement first and only then touched body focus. That
+        // detail matters for ARD's HbbTV navigation handlers.
+        dispatchPair(target, resolved, vkName);
         return true;
     };
+    window.__openhbbtvInjectKey.__openhbbtvBrokerVersion = 2;
 }());
 
 //# sourceMappingURL=hbbtv_polyfill.js.map
