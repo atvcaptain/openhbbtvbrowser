@@ -197,12 +197,17 @@ bool WebView::shouldForceNativeVisibleRefresh(const QString &reason) const
         return false;
 
     const QString r = reason.toLower();
+    // Do not use the hide/show native refresh for stream reveal/stop by default.
+    // On Vu+/eglfs_libvupl the short hide/show cycle can make the EGL surface
+    // appear only for one frame and then disappear again although QWidget still
+    // reports visible=true. The stream path now keeps the native surface alive
+    // and only uses lower()/raise(). Use OPENHBBTV_FORCE_VISIBLE_REFRESH=1 when
+    // the old diagnostic behaviour is required.
+    if (r.contains(QStringLiteral("stream")) || r.contains(QStringLiteral("live/dash")))
+        return false;
+
     return r.contains(QStringLiteral("broadcast hidden"))
         || r.contains(QStringLiteral("page load finished"))
-        || r.contains(QStringLiteral("stream ok"))
-        || r.contains(QStringLiteral("stream stop"))
-        || r.contains(QStringLiteral("stop stream"))
-        || r.contains(QStringLiteral("live/dash"))
         || r.contains(QStringLiteral("teletext"));
 }
 
@@ -338,17 +343,37 @@ void WebView::hideApplicationOverlay(const QString &reason)
             qDebug() << "[OpenHbbTV] save browser window geometry" << m_streamOverlaySavedGeometry;
         }
 
-        // With the qtbase/libvupl visibility update installed, do not move the
-        // native window off-screen anymore. Moving to 1x1/-4096 can survive a
-        // later show() on Vu/libvupl, so OK appears to do nothing although Qt
-        // reports visible=true. The correct path is now a plain QWidget::hide(),
-        // which qtbase must translate to VUGLES_SetVisible(false).
-        top->lower();
-        if (top->isVisible()) {
-            top->hide();
-            qDebug() << "[OpenHbbTV] hide browser window for stream" << reason;
+        const QString hideMode = QString::fromLocal8Bit(qgetenv("OPENHBBTV_STREAM_BROWSER_HIDE_MODE")).trimmed().toLower();
+        const bool nativeHide = hideMode == QStringLiteral("hide")
+            || hideMode == QStringLiteral("native")
+            || hideMode == QStringLiteral("hidden")
+            || hideMode == QStringLiteral("1")
+            || hideMode == QStringLiteral("true");
+
+        if (nativeHide) {
+            // Diagnostic fallback only. On Vu+/eglfs_libvupl this is the path
+            // that can produce a one-frame flash on OK and then leave the native
+            // surface invisible while Qt still reports visible=true.
+            top->lower();
+            if (top->isVisible()) {
+                top->hide();
+                qDebug() << "[OpenHbbTV] native-hide browser window for stream" << reason;
+            } else {
+                qDebug() << "[OpenHbbTV] browser window already native-hidden for stream" << reason;
+            }
         } else {
-            qDebug() << "[OpenHbbTV] browser window already hidden for stream" << reason;
+            // Default for Vu+/libvupl: keep the native EGL surface alive and only
+            // move it behind the video plane. SHOW_APPLICATION can then raise the
+            // same native surface again instead of recreating a hidden one.
+            if (m_streamOverlayGeometryValid)
+                top->setGeometry(m_streamOverlaySavedGeometry);
+            if (!top->isVisible()) {
+                top->showFullScreen();
+                qDebug() << "[OpenHbbTV] recreate visible browser surface before lower" << reason << top->geometry();
+            }
+            top->lower();
+            qDebug() << "[OpenHbbTV] lower browser window for stream without native hide" << reason
+                     << top->geometry() << "visible" << top->isVisible();
         }
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
     }
