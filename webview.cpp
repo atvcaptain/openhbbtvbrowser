@@ -183,6 +183,59 @@ void WebView::setBroadcastInfo(const QString &json)
 }
 
 
+
+bool WebView::shouldForceNativeVisibleRefresh(const QString &reason) const
+{
+    const QString force = QString::fromLocal8Bit(qgetenv("OPENHBBTV_FORCE_VISIBLE_REFRESH")).toLower();
+    if (force == QStringLiteral("1") || force == QStringLiteral("true") || force == QStringLiteral("yes"))
+        return true;
+
+    const QString qpa = QString::fromLocal8Bit(qgetenv("OPENHBBTV_QPA_PLATFORM")).toLower();
+    const QString eglfsIntegration = QString::fromLocal8Bit(qgetenv("QT_QPA_EGLFS_INTEGRATION")).toLower();
+    if (!qpa.contains(QStringLiteral("vupl")) && !eglfsIntegration.contains(QStringLiteral("vupl")))
+        return false;
+
+    const QString r = reason.toLower();
+    return r.contains(QStringLiteral("broadcast hidden"))
+        || r.contains(QStringLiteral("page load finished"))
+        || r.contains(QStringLiteral("stream ok"))
+        || r.contains(QStringLiteral("stream stop"))
+        || r.contains(QStringLiteral("stop stream"))
+        || r.contains(QStringLiteral("live/dash"))
+        || r.contains(QStringLiteral("teletext"));
+}
+
+void WebView::forceNativeVisibleRefresh(QWidget *top, const QString &reason)
+{
+    if (!top)
+        return;
+
+    qDebug() << "[OpenHbbTV] force native visible refresh for overlay" << reason << top->geometry() << "visible" << top->isVisible();
+
+    const QRect geometry = m_streamOverlayGeometryValid ? m_streamOverlaySavedGeometry : top->geometry();
+    if (geometry.isValid())
+        top->setGeometry(geometry);
+
+    // On Vu+/eglfs_libvupl the native GLES window can become invisible while
+    // Qt still reports the QWidget as visible. A plain showFullScreen() then
+    // does not reach QEglFSWindow::setVisible(true). The short hide/show cycle
+    // forces qtbase to call the libvupl visibility hook again.
+    if (top->isVisible()) {
+        top->hide();
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
+    }
+
+    if (geometry.isValid())
+        top->setGeometry(geometry);
+    top->showFullScreen();
+    top->raise();
+    top->activateWindow();
+    show();
+    setFocus(Qt::OtherFocusReason);
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
+    qDebug() << "[OpenHbbTV] native visible refresh done" << reason << top->geometry() << "visible" << top->isVisible();
+}
+
 void WebView::showApplicationOverlay(const QString &reason)
 {
     m_streamOverlayVisible = true;
@@ -195,15 +248,21 @@ void WebView::showApplicationOverlay(const QString &reason)
             top->setGeometry(m_streamOverlaySavedGeometry);
             qDebug() << "[OpenHbbTV] restore browser window geometry" << m_streamOverlaySavedGeometry << reason;
         }
-        if (!top->isVisible()) {
+        if (shouldForceNativeVisibleRefresh(reason)) {
+            forceNativeVisibleRefresh(top, reason);
+        } else if (!top->isVisible()) {
             top->showFullScreen();
             top->raise();
             top->activateWindow();
+            show();
+            setFocus(Qt::OtherFocusReason);
             qDebug() << "[OpenHbbTV] show browser window for overlay" << reason << top->geometry() << "visible" << top->isVisible();
         } else {
             top->showFullScreen();
             top->raise();
             top->activateWindow();
+            show();
+            setFocus(Qt::OtherFocusReason);
             qDebug() << "[OpenHbbTV] refresh visible browser window for overlay" << reason << top->geometry() << "visible" << top->isVisible();
         }
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);

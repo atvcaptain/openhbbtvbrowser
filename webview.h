@@ -56,6 +56,8 @@ private:
     void beginTeletextReturn();
     void loadInitialUrlAfterTeletextReturn(int delayMs);
     void refreshApplicationAfterTeletextReturn();
+    bool shouldForceNativeVisibleRefresh(const QString &reason) const;
+    void forceNativeVisibleRefresh(QWidget *top, const QString &reason);
     bool isInitialUrl(const QUrl &candidate) const;
     void injectKeyEvent(int keyCode);
     bool nativeNavigationKeysEnabled() const;
