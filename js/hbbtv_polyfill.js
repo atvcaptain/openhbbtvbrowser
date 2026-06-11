@@ -29931,89 +29931,6 @@ function scanChildrenForPlayer(items) {
     });
 }
 
-
-function ensureDashTrickModeStyle() {
-    if (document.getElementById('openatv-dash-trickmode-style')) {
-        return;
-    }
-    var style = document.createElement('style');
-    style.id = 'openatv-dash-trickmode-style';
-    style.textContent = [
-        'html.openatv-dash-no-trickmode [data-openatv-dash-trickmode-hidden="1"] { display: none !important; visibility: hidden !important; pointer-events: none !important; }',
-        'html.openatv-dash-no-trickmode [aria-label*="rewind" i], html.openatv-dash-no-trickmode [title*="rewind" i] { display: none !important; visibility: hidden !important; pointer-events: none !important; }',
-        'html.openatv-dash-no-trickmode [aria-label*="fast forward" i], html.openatv-dash-no-trickmode [title*="fast forward" i] { display: none !important; visibility: hidden !important; pointer-events: none !important; }',
-        'html.openatv-dash-no-trickmode [aria-label*="fastforward" i], html.openatv-dash-no-trickmode [title*="fastforward" i] { display: none !important; visibility: hidden !important; pointer-events: none !important; }',
-        'html.openatv-dash-no-trickmode [aria-label*="vorspulen" i], html.openatv-dash-no-trickmode [title*="vorspulen" i] { display: none !important; visibility: hidden !important; pointer-events: none !important; }',
-        'html.openatv-dash-no-trickmode [aria-label*="zurückspulen" i], html.openatv-dash-no-trickmode [title*="zurückspulen" i] { display: none !important; visibility: hidden !important; pointer-events: none !important; }',
-        'html.openatv-dash-no-trickmode [aria-label*="rücklauf" i], html.openatv-dash-no-trickmode [title*="rücklauf" i] { display: none !important; visibility: hidden !important; pointer-events: none !important; }'
-    ].join('\n');
-    (document.head || document.documentElement).appendChild(style);
-}
-
-function findClickableTrickModeTarget(node) {
-    var target = node.closest && node.closest('button,[role="button"],a,[onclick],[tabindex],.button,.btn,.control,.controlButton,.playerButton,.player-button');
-    if (!target) {
-        target = node;
-    }
-    if (!target || target === document.documentElement || target === document.body) {
-        return null;
-    }
-    return target;
-}
-
-function markDashTrickModeControls() {
-    ensureDashTrickModeStyle();
-    var matcher = /(fast\s*-?\s*forward|fastforward|rewind|skip\s*-?\s*(forward|back|backward)|seek\s*-?\s*(forward|back|backward)|vorspulen|zurückspulen|rücklauf|vorlauf)/i;
-    var nodes = document.querySelectorAll('button,[role="button"],a,div,span,li,img,svg,use,path');
-    Array.prototype.forEach.call(nodes, function (node) {
-        var text = '';
-        if (node.textContent && node.textContent.length < 80) {
-            text = node.textContent;
-        }
-        var data = [
-            node.getAttribute && node.getAttribute('aria-label'),
-            node.getAttribute && node.getAttribute('title'),
-            node.getAttribute && node.getAttribute('alt'),
-            node.getAttribute && node.getAttribute('data-testid'),
-            node.getAttribute && node.getAttribute('data-test-id'),
-            node.getAttribute && node.getAttribute('class'),
-            node.getAttribute && node.getAttribute('id'),
-            text
-        ].filter(Boolean).join(' ');
-        if (!data || !matcher.test(data)) {
-            return;
-        }
-        var target = findClickableTrickModeTarget(node);
-        if (!target) {
-            return;
-        }
-        target.setAttribute('data-openatv-dash-trickmode-hidden', '1');
-    });
-}
-
-function setDashTrickModeControlsHidden(hidden, reason) {
-    ensureDashTrickModeStyle();
-    if (hidden) {
-        document.documentElement.classList.add('openatv-dash-no-trickmode');
-        markDashTrickModeControls();
-        [120, 400, 900, 1600, 2500].forEach(function (delay) {
-            window.setTimeout(markDashTrickModeControls, delay);
-        });
-        if (window.signalopenhbbtvbrowser) {
-            window.signalopenhbbtvbrowser('LOG:DASH trickmode controls hidden ' + (reason || ''));
-        }
-    } else {
-        document.documentElement.classList.remove('openatv-dash-no-trickmode');
-        var hiddenNodes = document.querySelectorAll('[data-openatv-dash-trickmode-hidden="1"]');
-        Array.prototype.forEach.call(hiddenNodes, function (node) {
-            node.removeAttribute('data-openatv-dash-trickmode-hidden');
-        });
-        if (window.signalopenhbbtvbrowser) {
-            window.signalopenhbbtvbrowser('LOG:DASH trickmode controls visible ' + (reason || ''));
-        }
-    }
-}
-
 class OipfAVControlMapper {
 
     /**
@@ -30089,9 +30006,6 @@ class OipfAVControlMapper {
         };
 
         this.avControlObject.play = (speed) => {
-            if (this.isDashVideo) {
-                setDashTrickModeControlsHidden(true, 'dash play speed ' + speed);
-            }
             if (speed === 0) {
                 this.avControlObject.speed = 0;
                 send("PAUSE_STREAM");
@@ -30112,10 +30026,6 @@ class OipfAVControlMapper {
                     send("LOG:AVControl.play ignored without data");
                     return false;
                 }
-                if (this.isDashVideo) {
-                    send("LOG:AVControl negative speed ignored for DASH");
-                    return false;
-                }
                 send("PLAY_STREAM:" + streamUrl);
                 dispatchPlayState(PLAY_STATES.connecting);
             }
@@ -30123,9 +30033,6 @@ class OipfAVControlMapper {
         };
         this.avControlObject.stop = () => {
             send("STOP_STREAM");
-            if (this.isDashVideo) {
-                setDashTrickModeControlsHidden(false, 'dash stop');
-            }
             this.avControlObject.playPosition = 0;
             this.avControlObject.speed = 0;
             dispatchPlayState(PLAY_STATES.stopped);
