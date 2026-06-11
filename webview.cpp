@@ -774,12 +774,12 @@ void WebView::dispatchHbbtvBridgeCommand(const QString &rawCommand)
     } else if (command.startsWith(QStringLiteral("SET_VIDEO_WINDOW:"))) {
         emit hbbtvCommand(CommandClient::CommandSetVideoWindow, command.mid(17));
     } else if (command.startsWith(QStringLiteral("PLAY_STREAM:"))) {
-        qDebug() << "[OpenHbbTV] local stream state playing after PLAY_STREAM";
-        setStreamState(1, -1);
-        // Do not wait for the backend state echo. Hide the browser surface as
-        // soon as the page requests external playback so the video can become
-        // visible before the app has a chance to process more navigation keys.
-        QTimer::singleShot(20, this, [this]() { hideApplicationOverlay(QStringLiteral("PLAY_STREAM immediate hide")); });
+        // Do not change the local stream state here. The HbbTV page should be able
+        // to show its connecting/player UI until E2 has really accepted the
+        // external stream and sends HIDE_APPLICATION / SET_STREAM_STATE back.
+        // Hiding immediately here breaks ARD live-stream transitions because the
+        // browser is lowered before the application finished building the player.
+        qDebug() << "[OpenHbbTV] forward PLAY_STREAM to backend and wait for backend hide/state";
         emit hbbtvCommand(CommandClient::CommandPlayStream, command.mid(12));
     } else if (command == QStringLiteral("STOP_STREAM")) {
         emit hbbtvCommand(CommandClient::CommandStopStream, QString());

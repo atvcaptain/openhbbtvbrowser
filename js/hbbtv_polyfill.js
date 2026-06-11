@@ -29996,6 +29996,22 @@ class OipfAVControlMapper {
             this.avControlObject.dispatchEvent(playerEvent);
         };
 
+        const clearAutoStartTimer = () => {
+            if (this._autoStartTimer) {
+                window.clearTimeout(this._autoStartTimer);
+                this._autoStartTimer = null;
+            }
+        };
+
+        const markPlayStreamSent = (streamUrl, reason) => {
+            window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
+            const ns = window.HBBTV_POLYFILL_NS;
+            ns.lastPlayStreamAt = Date.now();
+            ns.lastPlayStreamUrl = streamUrl || '';
+            clearAutoStartTimer();
+            send("LOG:AVControl PLAY_STREAM requested " + reason);
+        };
+
         const scheduleAutoStartAfterDataChange = (reason) => {
             if (!this.isDashVideo) {
                 return;
@@ -30003,42 +30019,37 @@ class OipfAVControlMapper {
             window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
             const ns = window.HBBTV_POLYFILL_NS;
             const lastBroadcastStopAt = ns.lastBroadcastStopAt || 0;
-            const now = Date.now();
-            if (!lastBroadcastStopAt || now - lastBroadcastStopAt > 4000) {
+            const scheduledAt = Date.now();
+            if (!lastBroadcastStopAt || scheduledAt - lastBroadcastStopAt > 5000) {
                 return;
             }
-            const streamUrl = this.originalDataAttribute || '';
-            if (!streamUrl || streamUrl === 'about:blank') {
+            const scheduledUrl = this.originalDataAttribute || '';
+            if (!scheduledUrl || scheduledUrl === 'about:blank') {
                 return;
             }
-            if (this._autoStartTimer) {
-                window.clearTimeout(this._autoStartTimer);
-                this._autoStartTimer = null;
-            }
-            send("LOG:AVControl schedule auto PLAY_STREAM after data change " + reason);
+            clearAutoStartTimer();
+            send("LOG:AVControl schedule delayed PLAY_STREAM after data change " + reason);
             this._autoStartTimer = window.setTimeout(() => {
                 this._autoStartTimer = null;
-                const currentUrl = this.originalDataAttribute || '';
+                const currentUrl = this.originalDataAttribute || this.avControlObject.data || this.avControlObject.getAttribute('data') || '';
                 if (!currentUrl || currentUrl === 'about:blank') {
-                    send("LOG:AVControl auto PLAY_STREAM skipped without data");
+                    send("LOG:AVControl delayed PLAY_STREAM skipped without data");
+                    return;
+                }
+                if (ns.lastPlayStreamAt && ns.lastPlayStreamAt >= scheduledAt) {
+                    send("LOG:AVControl delayed PLAY_STREAM skipped because normal play already happened");
                     return;
                 }
                 if (this.avControlObject.playState === PLAY_STATES.connecting || this.avControlObject.playState === PLAY_STATES.playing) {
-                    send("LOG:AVControl auto PLAY_STREAM skipped state " + this.avControlObject.playState);
+                    send("LOG:AVControl delayed PLAY_STREAM skipped state " + this.avControlObject.playState);
                     return;
                 }
-                const currentNow = Date.now();
-                if (this._lastAutoStartedUrl === currentUrl && currentNow - (this._lastAutoStartAt || 0) < 2500) {
-                    send("LOG:AVControl auto PLAY_STREAM skipped duplicate");
-                    return;
-                }
-                this._lastAutoStartedUrl = currentUrl;
-                this._lastAutoStartAt = currentNow;
+                markPlayStreamSent(currentUrl, "delayed data-change fallback");
                 this.avControlObject.speed = 1;
-                send("LOG:AVControl auto PLAY_STREAM after data change");
-                send("PLAY_STREAM:" + currentUrl);
                 dispatchPlayState(PLAY_STATES.connecting);
-            }, 700);
+                send("LOG:AVControl delayed PLAY_STREAM after data change");
+                send("PLAY_STREAM:" + currentUrl);
+            }, 1300);
         };
 
         const updateOriginalDataAttribute = () => {
@@ -30062,6 +30073,7 @@ class OipfAVControlMapper {
                     send("LOG:AVControl.play ignored without data");
                     return false;
                 }
+                markPlayStreamSent(streamUrl, "play speed " + speed);
                 send("PLAY_STREAM:" + streamUrl);
                 dispatchPlayState(PLAY_STATES.connecting);
             } else if (speed < 0) {
@@ -30071,6 +30083,7 @@ class OipfAVControlMapper {
                     send("LOG:AVControl.play ignored without data");
                     return false;
                 }
+                markPlayStreamSent(streamUrl, "play speed " + speed);
                 send("PLAY_STREAM:" + streamUrl);
                 dispatchPlayState(PLAY_STATES.connecting);
             }
@@ -30099,9 +30112,12 @@ class OipfAVControlMapper {
             if (event.attributeName === "data") {
                 const currentData = this.avControlObject.data || this.avControlObject.getAttribute('data') || '';
                 if (currentData && currentData !== "about:blank") {
+                    const changed = this.originalDataAttribute !== currentData;
                     this.originalDataAttribute = currentData;
                     this.avControlObject.data = "about:blank";
-                    scheduleAutoStartAfterDataChange("data mutation");
+                    if (changed) {
+                        scheduleAutoStartAfterDataChange("data mutation");
+                    }
                 }
             }
         };
