@@ -30081,6 +30081,12 @@ class OipfAVControlMapper {
 
         trace("constructor dash=" + !!this.isDashVideo + " originalData=" + (this.originalDataAttribute || ""));
         blockNativeAvSurface('constructor');
+        try {
+            if (window.HBBTV_POLYFILL_NS && window.HBBTV_POLYFILL_NS.html5VodRouteObjectMedia && this.originalDataAttribute) {
+                window.HBBTV_POLYFILL_NS.html5VodRouteObjectMedia(this.originalDataAttribute, 'avcontrol constructor', this.avControlObject);
+            }
+        } catch (ignoreVodRoute) {
+        }
 
         const dispatchPlayState = (state, reason) => {
             this.avControlObject.playState = state;
@@ -31604,6 +31610,35 @@ class OipfVideoBroadcastMapper {
         return '';
     }
 
+    function routeObjectMediaToE2(url, reason, objectElement) {
+        url = absoluteUrl(url || '');
+        if (!isRoutableMediaUrl(url)) {
+            return false;
+        }
+        if (!isProgressiveMediaUrl(url) && !pageLooksLikeVodPlayback()) {
+            log('object media guarded without E2 route reason=' + reason + ' url=' + url + ' page=' + window.location.href);
+            return false;
+        }
+        try {
+            if (objectElement) {
+                objectElement.__openhbbtvOriginalDataAttribute = url;
+                objectElement.style.background = 'transparent';
+                objectElement.style.opacity = '0';
+                objectElement.style.visibility = 'hidden';
+                objectElement.style.pointerEvents = 'none';
+                objectElement.style.width = '1px';
+                objectElement.style.height = '1px';
+                objectElement.style.position = 'absolute';
+                objectElement.style.left = '-8192px';
+                objectElement.style.top = '-8192px';
+            }
+        } catch (ignoreStyle) {
+        }
+        return routeManifestToE2(url, 'object ' + reason, null);
+    }
+
+    ns.html5VodRouteObjectMedia = routeObjectMediaToE2;
+
     function installNativeMediaGuard() {
         if (ns.html5VodNativeGuardInstalled) {
             return;
@@ -31618,6 +31653,7 @@ class OipfVideoBroadcastMapper {
                 }
                 objectElement.__openhbbtvOriginalDataAttribute = url;
                 log('object native media guarded reason=' + reason + ' type=' + (objectElement.type || objectElement.getAttribute && objectElement.getAttribute('type') || '') + ' url=' + url);
+                routeObjectMediaToE2(url, reason, objectElement);
                 return true;
             } catch (error) {
                 log('object native media guard failed reason=' + reason + ' error=' + error);
