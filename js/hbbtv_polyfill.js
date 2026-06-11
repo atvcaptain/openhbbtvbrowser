@@ -29956,16 +29956,6 @@ class OipfAVControlMapper {
             window.HBBTV_POLYFILL_NS.avControlObjects.push(this.avControlObject);
         }
         window.HBBTV_POLYFILL_NS.setStreamState = function (state, error) {
-            window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
-            if (state === PLAY_STATES.stopped) {
-                window.HBBTV_POLYFILL_NS.lastExternalStreamStoppedAt = Date.now();
-                if (window.signalopenhbbtvbrowser) {
-                    window.signalopenhbbtvbrowser("LOG:AVControl external stream stopped marker");
-                }
-            } else if (state === PLAY_STATES.connecting || state === PLAY_STATES.playing) {
-                window.HBBTV_POLYFILL_NS.liveSwitchRetryCount = 0;
-                window.HBBTV_POLYFILL_NS.liveSwitchRetryPending = 0;
-            }
             var objects = window.HBBTV_POLYFILL_NS.avControlObjects || [];
             objects.forEach(function (obj) {
                 if (!obj || !obj.isConnected) {
@@ -30029,8 +30019,6 @@ class OipfAVControlMapper {
             const ns = window.HBBTV_POLYFILL_NS;
             ns.lastPlayStreamAt = Date.now();
             ns.lastPlayStreamUrl = streamUrl || '';
-            ns.liveSwitchRetryCount = 0;
-            ns.liveSwitchRetryPending = 0;
             clearAutoStartTimer();
             send("LOG:AVControl PLAY_STREAM requested " + reason);
         };
@@ -31036,61 +31024,6 @@ class OipfVideoBroadcastMapper {
             var style = window.getComputedStyle(oipfPluginObject);
             return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
         };
-        const scheduleLiveSwitchEnterRetry = (reason) => {
-            window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
-            const ns = window.HBBTV_POLYFILL_NS;
-            const now = Date.now();
-            const lastExternalStop = ns.lastExternalStreamStoppedAt || 0;
-            if (!lastExternalStop || now - lastExternalStop > 30000) {
-                return;
-            }
-            if (ns.liveSwitchRetryPending && now - ns.liveSwitchRetryPending < 2000) {
-                send("LOG:AVControl live switch retry skipped pending " + reason);
-                return;
-            }
-            ns.liveSwitchRetryPending = now;
-            ns.liveSwitchRetryCount = (ns.liveSwitchRetryCount || 0) + 1;
-            if (ns.liveSwitchRetryCount > 3) {
-                send("LOG:AVControl live switch retry skipped max " + reason);
-                return;
-            }
-            const scheduledAt = now;
-            const dispatchEnter = (delay) => {
-                window.setTimeout(function () {
-                    if ((ns.lastPlayStreamAt || 0) >= scheduledAt) {
-                        send("LOG:AVControl live switch retry skipped, PLAY_STREAM already sent delay=" + delay + " " + reason);
-                        return;
-                    }
-                    if (Date.now() - (ns.lastExternalStreamStoppedAt || 0) > 35000) {
-                        send("LOG:AVControl live switch retry skipped stale delay=" + delay + " " + reason);
-                        return;
-                    }
-                    try {
-                        const target = document.activeElement || document.body || document.documentElement;
-                        send("LOG:AVControl live switch retry Enter delay=" + delay + " reason=" + reason + " active=" + (target && (target.id || target.className || target.tagName) || 'none'));
-                        const keyInit = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
-                        const down = new KeyboardEvent('keydown', keyInit);
-                        const up = new KeyboardEvent('keyup', keyInit);
-                        try { Object.defineProperty(down, 'keyCode', { get: function () { return 13; } }); } catch (e) {}
-                        try { Object.defineProperty(down, 'which', { get: function () { return 13; } }); } catch (e) {}
-                        try { Object.defineProperty(up, 'keyCode', { get: function () { return 13; } }); } catch (e) {}
-                        try { Object.defineProperty(up, 'which', { get: function () { return 13; } }); } catch (e) {}
-                        (target || document).dispatchEvent(down);
-                        document.dispatchEvent(down);
-                        window.dispatchEvent(down);
-                        window.setTimeout(function () {
-                            (target || document).dispatchEvent(up);
-                            document.dispatchEvent(up);
-                            window.dispatchEvent(up);
-                        }, 45);
-                    } catch (e) {
-                        send("LOG:AVControl live switch retry Enter failed " + e);
-                    }
-                }, delay);
-            };
-            dispatchEnter(650);
-            dispatchEnter(1450);
-        };
         let lastRect = '';
         let lastVisible = undefined;
         const reportVideoWindow = () => {
@@ -31186,7 +31119,6 @@ class OipfVideoBroadcastMapper {
             send("BROADCAST_STOP");
             send("UNSET_VIDEO_WINDOW");
             dispatchPlayState(0);
-            scheduleLiveSwitchEnterRetry('broadcast stop');
             return true;
         };
         oipfPluginObject.release = function () {
@@ -31201,7 +31133,6 @@ class OipfVideoBroadcastMapper {
             send("BROADCAST_STOP");
             send("UNSET_VIDEO_WINDOW");
             dispatchPlayState(0);
-            scheduleLiveSwitchEnterRetry('broadcast release');
         };
         startVideoWindowObserver();
         function ChannelConfig() {
