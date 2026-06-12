@@ -342,16 +342,17 @@ void WebView::showApplicationOverlay(const QString &reason)
 {
     const bool streamReason = isStreamActive() && reason.toLower().contains(QStringLiteral("stream"));
     const bool wasOverlayVisible = m_streamOverlayVisible;
+    const bool wasOverlayLowered = m_streamOverlayLowered;
     m_streamOverlayVisible = true;
-    m_streamOverlayLowered = false;
     if (isStreamActive())
         m_streamOverlayHoldUntilMs = QDateTime::currentMSecsSinceEpoch() + 2000;
 
     qDebug() << "[OpenHbbTV] show application overlay" << reason
-             << "streamReason" << streamReason << "wasVisible" << wasOverlayVisible;
+             << "streamReason" << streamReason << "wasVisible" << wasOverlayVisible
+             << "wasLowered" << wasOverlayLowered;
 
     QWidget *top = window();
-    const bool duplicateVisibleStreamOverlay = streamReason && wasOverlayVisible && top && top->isVisible();
+    const bool duplicateVisibleStreamOverlay = streamReason && wasOverlayVisible && !wasOverlayLowered && top && top->isVisible();
     if (duplicateVisibleStreamOverlay) {
         // Preserve the proven key/RCU path.  Only suppress repeated native
         // EGL/libvupl refresh work when the stream overlay is already visible.
@@ -360,6 +361,12 @@ void WebView::showApplicationOverlay(const QString &reason)
         qDebug() << "[OpenHbbTV] skip duplicate stream overlay native refresh" << reason
                  << top->geometry() << "visible" << top->isVisible();
     } else if (top) {
+        if (wasOverlayLowered) {
+            qDebug() << "[OpenHbbTV] restore parked browser native surface for overlay" << reason
+                     << "current" << top->geometry()
+                     << "restore" << m_streamOverlaySavedGeometry
+                     << "visible" << top->isVisible();
+        }
         if (m_streamOverlayGeometryValid) {
             top->setGeometry(m_streamOverlaySavedGeometry);
             qDebug() << "[OpenHbbTV] restore browser window geometry" << m_streamOverlaySavedGeometry << reason;
@@ -382,6 +389,7 @@ void WebView::showApplicationOverlay(const QString &reason)
             qDebug() << "[OpenHbbTV] refresh visible browser window for overlay" << reason << top->geometry() << "visible" << top->isVisible();
         }
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
+        m_streamOverlayLowered = false;
     }
     if (streamReason && !duplicateVisibleStreamOverlay) {
         retryStreamOverlayVisible(reason, 120);
