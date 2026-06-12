@@ -32186,7 +32186,7 @@ class OipfVideoBroadcastMapper {
     if (typeof window !== 'object' || typeof document !== 'object') {
         return;
     }
-    if (window.__openhbbtvInjectKey && window.__openhbbtvInjectKey.__openhbbtvBrokerVersion >= 3) {
+    if (window.__openhbbtvInjectKey && window.__openhbbtvInjectKey.__openhbbtvBrokerVersion >= 4) {
         return;
     }
     function send(command) {
@@ -32200,10 +32200,14 @@ class OipfVideoBroadcastMapper {
     function legacyKeyName(value, vkName) {
         if (value >= 48 && value <= 57) { return String.fromCharCode(value); }
         if (value === 13) { return 'Enter'; }
-        if (value === 37 || value === 403) { return 'ArrowLeft'; }
-        if (value === 38 || value === 404) { return 'ArrowUp'; }
-        if (value === 39 || value === 405) { return 'ArrowRight'; }
-        if (value === 40 || value === 406) { return 'ArrowDown'; }
+        if (value === 37) { return 'ArrowLeft'; }
+        if (value === 38) { return 'ArrowUp'; }
+        if (value === 39) { return 'ArrowRight'; }
+        if (value === 40) { return 'ArrowDown'; }
+        if (value === 403) { return 'ColorF0Red'; }
+        if (value === 404) { return 'ColorF1Green'; }
+        if (value === 405) { return 'ColorF2Yellow'; }
+        if (value === 406) { return 'ColorF3Blue'; }
         if (value === 461) { return 'Backspace'; }
         if (value === 413) { return 'Stop'; }
         if (value === 415) { return 'Play'; }
@@ -32248,6 +32252,25 @@ class OipfVideoBroadcastMapper {
         }
         return document.body || document.documentElement || active || document;
     }
+    function handlerSummary() {
+        var parts = [];
+        try { if (window.onkeydown || window.onkeyup) { parts.push('window'); } } catch (ignoreWindowHandlers) {}
+        try { if (document.onkeydown || document.onkeyup) { parts.push('document'); } } catch (ignoreDocumentHandlers) {}
+        try { if (document.body && (document.body.onkeydown || document.body.onkeyup)) { parts.push('body'); } } catch (ignoreBodyHandlers) {}
+        return parts.length ? parts.join(',') : 'none';
+    }
+    function keysetSummary() {
+        try {
+            if (window.oipfApplicationManager && window.oipfApplicationManager.getOwnerApplication) {
+                var app = window.oipfApplicationManager.getOwnerApplication(document);
+                if (app && app.privateData && app.privateData.keyset) {
+                    return String(app.privateData.keyset.value);
+                }
+            }
+        } catch (ignoreKeyset) {
+        }
+        return 'unknown';
+    }
     function makeEvent(type, code, vkName) {
         var key = legacyKeyName(code, vkName);
         var e;
@@ -32288,7 +32311,7 @@ class OipfVideoBroadcastMapper {
             try { target.dispatchEvent(makeEvent('keyup', code, vkName)); }
             catch (e2) { send('LOG:InjectedKey keyup failed target=' + describe(target) + ' error=' + e2); }
         }, 25);
-        send('LOG:InjectedKey broker v3 target=' + describe(target) + ' active=' + describe(document.activeElement) + ' key=' + code + ' vk=' + (vkName || '') + ' legacyKey=' + key + ' accepted=' + (!!downResult));
+        send('LOG:InjectedKey broker v4 target=' + describe(target) + ' active=' + describe(document.activeElement) + ' key=' + code + ' vk=' + (vkName || '') + ' eventKey=' + key + ' accepted=' + (!!downResult) + ' handlers=' + handlerSummary() + ' keyset=' + keysetSummary());
     }
     window.__openhbbtvInjectKey = function (code, vkName) {
         var resolved = resolveCode(code, vkName);
@@ -32303,7 +32326,7 @@ class OipfVideoBroadcastMapper {
         dispatchPair(target, resolved, vkName);
         return true;
     };
-    window.__openhbbtvInjectKey.__openhbbtvBrokerVersion = 3;
+    window.__openhbbtvInjectKey.__openhbbtvBrokerVersion = 4;
 }());
 
 //# sourceMappingURL=hbbtv_polyfill.js.map

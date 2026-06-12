@@ -11,6 +11,28 @@
 static QMutex g_logMutex;
 static QString g_logPath;
 
+#ifndef OPENHBBTV_DEBUG_DEFAULT
+#define OPENHBBTV_DEBUG_DEFAULT 1
+#endif
+
+static bool isFalseValue(QByteArray value)
+{
+    value = value.trimmed().toLower();
+    return value == QByteArrayLiteral("0")
+        || value == QByteArrayLiteral("no")
+        || value == QByteArrayLiteral("false")
+        || value == QByteArrayLiteral("off")
+        || value == QByteArrayLiteral("disabled");
+}
+
+static bool openHbbTVDebugEnabled()
+{
+    const QByteArray env = qgetenv("OPENHBBTV_DEBUG");
+    if (!env.trimmed().isEmpty())
+        return !isFalseValue(env);
+    return OPENHBBTV_DEBUG_DEFAULT != 0;
+}
+
 static QString messageTypeName(QtMsgType type)
 {
     switch (type) {
@@ -21,6 +43,24 @@ static QString messageTypeName(QtMsgType type)
     case QtFatalMsg:    return QStringLiteral("FATAL");
     }
     return QStringLiteral("LOG");
+}
+
+static void openHbbTVQuietMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
+{
+    Q_UNUSED(context)
+
+    if (type == QtDebugMsg || type == QtInfoMsg)
+        return;
+
+    const QString line = QStringLiteral("%1 [%2] %3\n")
+            .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd hh:mm:ss.zzz")),
+                 messageTypeName(type),
+                 msg);
+    std::fwrite(line.toLocal8Bit().constData(), 1, line.toLocal8Bit().size(), stderr);
+    std::fflush(stderr);
+
+    if (type == QtFatalMsg)
+        abort();
 }
 
 static void openHbbTVDebugMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
@@ -50,6 +90,11 @@ static void openHbbTVDebugMessageHandler(QtMsgType type, const QMessageLogContex
 
 void installOpenHbbTVDebugLogger()
 {
+    if (!openHbbTVDebugEnabled()) {
+        qInstallMessageHandler(openHbbTVQuietMessageHandler);
+        return;
+    }
+
     const QByteArray envPath = qgetenv("OPENHBBTV_LOGFILE");
     g_logPath = QString::fromLocal8Bit(envPath.isEmpty() ? QByteArrayLiteral("/tmp/openhbbtvbrowser-debug.log") : envPath);
 
