@@ -30200,9 +30200,9 @@ class OipfAVControlMapper {
             return true;
         };
         this.avControlObject.stop = () => {
+            send("STOP_STREAM");
             trace("stop() -> STOP_STREAM");
             try { if (window.HBBTV_POLYFILL_NS && window.HBBTV_POLYFILL_NS.html5VodEndSession) { window.HBBTV_POLYFILL_NS.html5VodEndSession('avcontrol stop'); } } catch (ignoreEndSession) {}
-            send("STOP_STREAM");
             this.avControlObject.playPosition = 0;
             this.avControlObject.speed = 0;
             dispatchPlayState(PLAY_STATES.stopped, "stop()");
@@ -30910,18 +30910,46 @@ function init() {
     window.__openatvHbbtvCommandSeq = 0;
     window.__openatvHbbtvCommandQueue = [];
     window.__openatvHbbtvCommandActive = false;
+    window.__openatvHbbtvCriticalHoldUntil = 0;
+    window.__openatvHbbtvSendTitleCommand = function(command) {
+        window.__openatvHbbtvCommandSeq += 1;
+        document.title = "OPENATV_HBBTV:" + command + "||" + window.__openatvHbbtvCommandSeq;
+    };
+    window.__openatvHbbtvCommandIsCritical = function(command) {
+        if (!command) {
+            return false;
+        }
+        return command === "STOP_STREAM" ||
+            command === "PAUSE_STREAM" ||
+            command === "RESTORE_BROADCAST" ||
+            command.indexOf("PLAY_STREAM:") === 0 ||
+            command.indexOf("SEEK_STREAM:") === 0;
+    };
     window.__openatvHbbtvFlushCommandQueue = function() {
+        var now = Date.now ? Date.now() : (new Date()).getTime();
+        if (window.__openatvHbbtvCriticalHoldUntil && now < window.__openatvHbbtvCriticalHoldUntil) {
+            window.setTimeout(window.__openatvHbbtvFlushCommandQueue, Math.max(1, window.__openatvHbbtvCriticalHoldUntil - now));
+            return;
+        }
         if (!window.__openatvHbbtvCommandQueue.length) {
             window.__openatvHbbtvCommandActive = false;
             return;
         }
         window.__openatvHbbtvCommandActive = true;
         var command = window.__openatvHbbtvCommandQueue.shift();
-        window.__openatvHbbtvCommandSeq += 1;
-        document.title = "OPENATV_HBBTV:" + command + "||" + window.__openatvHbbtvCommandSeq;
+        window.__openatvHbbtvSendTitleCommand(command);
         window.setTimeout(window.__openatvHbbtvFlushCommandQueue, 25);
     };
     window.signalopenhbbtvbrowser = function(command) {
+        if (window.__openatvHbbtvCommandIsCritical(command)) {
+            window.__openatvHbbtvCommandQueue = window.__openatvHbbtvCommandQueue.filter(function(item) {
+                return item && item.indexOf("LOG:") !== 0;
+            });
+            window.__openatvHbbtvCriticalHoldUntil = (Date.now ? Date.now() : (new Date()).getTime()) + 60;
+            window.__openatvHbbtvSendTitleCommand(command);
+            window.setTimeout(window.__openatvHbbtvFlushCommandQueue, 60);
+            return;
+        }
         window.__openatvHbbtvCommandQueue.push(command);
         if (!window.__openatvHbbtvCommandActive) {
             window.setTimeout(window.__openatvHbbtvFlushCommandQueue, 0);
