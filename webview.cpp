@@ -444,8 +444,6 @@ void WebView::hideApplicationOverlay(const QString &reason)
         }
 
         const QString hideMode = QString::fromLocal8Bit(qgetenv("OPENHBBTV_STREAM_BROWSER_HIDE_MODE")).trimmed().toLower();
-        const bool liveLikeReason = reasonLower.contains(QStringLiteral("live"))
-            || reasonLower.contains(QStringLiteral("dash"));
         const bool reasonNativeHide = reasonLower.contains(QStringLiteral("vod-native-hide"))
             || reasonLower.contains(QStringLiteral("native-hide"));
         const bool nativeHide = reasonNativeHide
@@ -461,8 +459,7 @@ void WebView::hideApplicationOverlay(const QString &reason)
         const bool parkMode = hideMode == QStringLiteral("park")
             || hideMode == QStringLiteral("tiny")
             || hideMode == QStringLiteral("move")
-            || hideMode == QStringLiteral("safe")
-            || (hideMode.isEmpty() && liveLikeReason);
+            || hideMode == QStringLiteral("safe");
 
         if (nativeHide) {
             // Diagnostic fallback only. On Vu+/eglfs_libvupl this is the path
@@ -479,10 +476,8 @@ void WebView::hideApplicationOverlay(const QString &reason)
             qDebug() << "[OpenHbbTV] keep browser window alive and visible for stream" << reason
                      << top->geometry() << "visible" << top->isVisible();
         } else if (parkMode) {
-            // Default for live DASH on Vu+/libvupl: keep the EGL surface alive,
-            // but park it as a tiny visible window instead of using
-            // QWidget::lower()/hide(). This keeps the browser recoverable for
-            // SHOW_APPLICATION while the E2 video plane remains unobstructed.
+            // Diagnostic opt-in only. The default path below intentionally
+            // mirrors the stable VOD handling and avoids tiny native geometry.
             if (!top->isVisible()) {
                 top->showFullScreen();
                 qDebug() << "[OpenHbbTV] recreate visible browser surface before park" << reason << top->geometry();
@@ -497,11 +492,10 @@ void WebView::hideApplicationOverlay(const QString &reason)
                      << parkGeometry << "visible" << top->isVisible()
                      << "restore" << m_streamOverlaySavedGeometry;
         } else {
-            // Diagnostic fallback. This was the old default, but on Vu+/libvupl
-            // it can make the Chromium display compositor report incomplete
-            // framebuffers and crash the render process during live DASH. It is
-            // still the default for non-live streams because VOD is currently
-            // stable on this path.
+            // Default for all external E2 playback. Keep the browser's native
+            // surface full-size and alive, but lower the Qt window so the E2
+            // video plane is visible. This mirrors the stable VOD path and
+            // avoids the 1x1 native park geometry that crashed live DASH.
             if (m_streamOverlayGeometryValid)
                 top->setGeometry(m_streamOverlaySavedGeometry);
             if (!top->isVisible()) {
@@ -509,7 +503,7 @@ void WebView::hideApplicationOverlay(const QString &reason)
                 qDebug() << "[OpenHbbTV] recreate visible browser surface before lower" << reason << top->geometry();
             }
             top->lower();
-            qDebug() << "[OpenHbbTV] lower browser window for stream without native hide" << reason
+            qDebug() << "[OpenHbbTV] lower browser window for stream without native hide (vod-style)" << reason
                      << top->geometry() << "visible" << top->isVisible();
         }
         m_streamOverlayLowered = true;
