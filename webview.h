@@ -7,6 +7,9 @@
 #include <QUrl>
 #include <QTimer>
 #include <QRect>
+#include <QPointer>
+
+class QWebEnginePage;
 
 class OpenHbbTVRequestInterceptor : public QWebEngineUrlRequestInterceptor {
 public:
@@ -68,6 +71,7 @@ public:
     void setInitialUrl(const QUrl &url);
     void setLanguage(const QString &language);
     void setScriptDebugging(const QString &scriptDebugging);
+    void attachPageDiagnostics();
 
 Q_SIGNALS:
     void hbbtvCommand(int command, const QString &data);
@@ -90,8 +94,11 @@ private:
     void beginTeletextReturn();
     void loadInitialUrlAfterTeletextReturn(int delayMs);
     void refreshApplicationAfterTeletextReturn();
+    void runJavaScriptWithWatchdog(const QString &label, const QString &script, int timeoutMs = 1200, bool recoverOnTimeout = false);
     bool shouldForceNativeVisibleRefresh(const QString &reason) const;
     void forceNativeVisibleRefresh(QWidget *top, const QString &reason);
+    void repaintOverlaySurface(const QString &reason);
+    void retryOverlayRepaint(const QString &reason, int delayMs);
     void retryStreamOverlayVisible(const QString &reason, int delayMs);
     bool isInitialUrl(const QUrl &candidate) const;
     void injectKeyEvent(int keyCode);
@@ -105,6 +112,8 @@ private:
     qint64 m_streamOverlayHoldUntilMs;
     QRect m_streamOverlaySavedGeometry;
     bool m_streamOverlayGeometryValid;
+    bool m_jsTimeoutRecoveryPending;
+    QPointer<QWebEnginePage> m_diagnosticsPage;
     bool m_teletextReturnInProgress;
     QString m_teletextDigitBuffer;
     QTimer *m_teletextDigitTimer;

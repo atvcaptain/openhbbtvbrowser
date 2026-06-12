@@ -15,6 +15,7 @@ BrowserWindow::BrowserWindow(QWidget *parent, Qt::WindowFlags flags)
 {
     WebPage *page = new WebPage(QWebEngineProfile::defaultProfile(), m_webView);
     m_webView->setPage(page);
+    m_webView->attachPageDiagnostics();
     m_webView->setCursor(Qt::BlankCursor);
     m_webView->show();
 
@@ -24,7 +25,7 @@ BrowserWindow::BrowserWindow(QWidget *parent, Qt::WindowFlags flags)
     connect(m_webView, &WebView::hbbtvCommand, this, &BrowserWindow::sendHbbtvCommand);
     connect(m_commandClient, &CommandClient::commandReceived, this, &BrowserWindow::onBackendCommand);
     qDebug() << "[OpenHbbTV] BrowserWindow created";
-    qDebug() << "[OpenHbbTV] build id e2-rcu-owner-keybridge-v5-jsack-unackedok-fallback-20260612";
+    qDebug() << "[OpenHbbTV] build id e2-rcu-owner-keybridge-v6-jswatchdog-vuplrepaint-20260612";
     qDebug() << "[OpenHbbTV] backend command support OPEN_URL SET_CHANNEL BROADCAST_INFO SHOW_APPLICATION HIDE_APPLICATION INJECT_KEY SET_STREAM_STATE QUIT";
 }
 

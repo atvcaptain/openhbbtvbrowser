@@ -16,6 +16,7 @@
 #include <QDateTime>
 #include <QCoreApplication>
 #include <QPointer>
+#include <QSharedPointer>
 #include <QVariant>
 
 WebView::WebView(QWidget *parent)
@@ -24,6 +25,7 @@ WebView::WebView(QWidget *parent)
     , m_streamOverlayVisible(true)
     , m_streamOverlayHoldUntilMs(0)
     , m_streamOverlayGeometryValid(false)
+    , m_jsTimeoutRecoveryPending(false)
     , m_teletextReturnInProgress(false)
     , m_teletextDigitTimer(new QTimer(this))
     , m_quitMsg(new QLabel)
@@ -60,10 +62,46 @@ WebView::WebView(QWidget *parent)
         }
     });
     connect(this, &QWebEngineView::loadFinished, this, &WebView::loadFinished);
-    connect(page(), &QWebEnginePage::renderProcessTerminated, this,
+    attachPageDiagnostics();
+}
+
+void WebView::attachPageDiagnostics()
+{
+    QWebEnginePage *currentPage = page();
+    if (!currentPage || m_diagnosticsPage == currentPage)
+        return;
+
+    m_diagnosticsPage = currentPage;
+    connect(currentPage, &QWebEnginePage::renderProcessTerminated, this,
             [this](QWebEnginePage::RenderProcessTerminationStatus status, int exitCode) {
                 qWarning() << "[OpenHbbTV] renderProcessTerminated" << status << exitCode << url().toString();
+                if (!m_jsTimeoutRecoveryPending && !isStreamActive()) {
+                    m_jsTimeoutRecoveryPending = true;
+                    emit hbbtvCommand(CommandClient::CommandRestartApplication,
+                                      QStringLiteral("render-process-terminated"));
+                }
             });
+    qDebug() << "[OpenHbbTV] page diagnostics attached" << currentPage;
+}
+
+void WebView::runJavaScriptWithWatchdog(const QString &label, const QString &script, int timeoutMs, bool recoverOnTimeout)
+{
+    QSharedPointer<bool> completed(new bool(false));
+    page()->runJavaScript(script, [completed, label](const QVariant &result) {
+        *completed = true;
+        qDebug() << "[OpenHbbTV] JS result" << label << result;
+    });
+
+    QTimer::singleShot(timeoutMs, this, [this, completed, label, recoverOnTimeout]() {
+        if (*completed)
+            return;
+        qWarning() << "[OpenHbbTV] JS timeout" << label << "stream" << m_streamState << "url" << url().toString();
+        if (recoverOnTimeout && !m_jsTimeoutRecoveryPending && !isStreamActive()) {
+            m_jsTimeoutRecoveryPending = true;
+            qWarning() << "[OpenHbbTV] JS timeout recovery restart application" << label;
+            emit hbbtvCommand(CommandClient::CommandRestartApplication, QStringLiteral("js-timeout ") + label);
+        }
+    });
 }
 
 void WebView::injectHbbTVScripts(const QString &src)
@@ -154,7 +192,7 @@ void WebView::setCurrentChannel(const int &onid, const int &tsid, const int &sid
     script.setWorldId(QWebEngineScript::MainWorld);
     page()->scripts().insert(script);
     qDebug() << "[OpenHbbTV] setCurrentChannel" << onid << tsid << sid;
-    page()->runJavaScript(s);
+    runJavaScriptWithWatchdog(QStringLiteral("setCurrentChannel"), s);
 }
 
 void WebView::setBroadcastInfo(const QString &json)
@@ -181,7 +219,7 @@ void WebView::setBroadcastInfo(const QString &json)
         "    console.log('OpenHbbTV setBroadcastInfo failed', e);"
         "  }"
         "})();").arg(QString::fromLatin1(encoded));
-    page()->runJavaScript(s);
+    runJavaScriptWithWatchdog(QStringLiteral("setBroadcastInfo"), s);
 }
 
 
@@ -225,6 +263,39 @@ void WebView::forceNativeVisibleRefresh(QWidget *top, const QString &reason)
     repaint();
     QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
     qDebug() << "[OpenHbbTV] safe visible refresh done" << reason << top->geometry() << "visible" << top->isVisible();
+}
+
+void WebView::repaintOverlaySurface(const QString &reason)
+{
+    QWidget *top = window();
+    if (!top)
+        return;
+    qDebug() << "[OpenHbbTV] repaint overlay surface" << reason
+             << top->geometry() << "visible" << top->isVisible()
+             << "stream" << m_streamState;
+    top->raise();
+    show();
+    setFocus(Qt::OtherFocusReason);
+    update();
+    repaint();
+    top->update();
+    top->repaint();
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
+}
+
+void WebView::retryOverlayRepaint(const QString &reason, int delayMs)
+{
+    QPointer<QWidget> top = window();
+    QTimer::singleShot(delayMs, this, [this, top, reason, delayMs]() {
+        if (!top || !top->isVisible()) {
+            qDebug() << "[OpenHbbTV] skip overlay repaint retry" << delayMs << reason
+                     << "top" << static_cast<bool>(top)
+                     << "visible" << (top ? top->isVisible() : false);
+            return;
+        }
+        qDebug() << "[OpenHbbTV] overlay repaint retry" << delayMs << reason;
+        repaintOverlaySurface(reason + QStringLiteral(" retry %1").arg(delayMs));
+    });
 }
 
 void WebView::retryStreamOverlayVisible(const QString &reason, int delayMs)
@@ -307,7 +378,13 @@ void WebView::showApplicationOverlay(const QString &reason)
         retryStreamOverlayVisible(reason, 450);
         retryStreamOverlayVisible(reason, 900);
     }
-    page()->runJavaScript(QString::fromLatin1(
+    const bool postStreamReturn = reason.toLower().contains(QStringLiteral("stream state stopped"));
+    if ((streamReason && !duplicateVisibleStreamOverlay) || postStreamReturn) {
+        repaintOverlaySurface(reason);
+        retryOverlayRepaint(reason, 120);
+        retryOverlayRepaint(reason, 450);
+    }
+    runJavaScriptWithWatchdog(QStringLiteral("showApplicationOverlay ") + reason, QString::fromLatin1(
         "(function() {"
         "  try { if (document.documentElement) document.documentElement.style.visibility = 'visible'; } catch (e) {}"
         "  try { if (document.body) { document.body.style.visibility = 'visible'; document.body.style.display = ''; document.body.style.opacity = '1'; if (document.body.focus) document.body.focus(); } } catch (e) {}"
@@ -383,7 +460,7 @@ void WebView::hideApplicationOverlay(const QString &reason)
 void WebView::refreshApplicationAfterTeletextReturn()
 {
     qDebug() << "[OpenHbbTV] refresh application after teletext return";
-    page()->runJavaScript(QString::fromLatin1(
+    runJavaScriptWithWatchdog(QStringLiteral("refreshApplicationAfterTeletextReturn"), QString::fromLatin1(
         "(function() {"
         "  try { document.body.style.visibility = 'visible'; } catch (e) {}"
         "  try {"
@@ -418,7 +495,7 @@ void WebView::setStreamState(int state, int error)
                                     "    window.HBBTV_POLYFILL_NS.pendingStreamState = [%1, %2];"
                                     "  }"
                                     "})();").arg(state).arg(error);
-    page()->runJavaScript(s);
+    runJavaScriptWithWatchdog(QStringLiteral("setStreamState %1,%2").arg(state).arg(error), s);
     if (state == 1) {
         // When external E2 playback starts the browser must get out of the
         // video plane immediately. Especially on Vu+/libvupl the full-screen
@@ -803,8 +880,22 @@ void WebView::injectKeyEvent(int keyCode)
                                     "  return 'fallback:' + resolved + ':' + describe(target);"
                                     "})();").arg(keyCode).arg(vkName);
     qDebug() << "[OpenHbbTV] inject keydown+keyup broker" << keyCode;
-    page()->runJavaScript(s, [keyCode](const QVariant &result) {
+    QSharedPointer<bool> completed(new bool(false));
+    page()->runJavaScript(s, [completed, keyCode](const QVariant &result) {
+        *completed = true;
         qDebug() << "[OpenHbbTV] inject key JS result" << keyCode << result;
+    });
+    QTimer::singleShot(1500, this, [this, completed, keyCode]() {
+        if (*completed)
+            return;
+        qWarning() << "[OpenHbbTV] inject key JS timeout" << keyCode
+                   << "stream" << m_streamState << "url" << url().toString();
+        if (!m_jsTimeoutRecoveryPending && !isStreamActive()) {
+            m_jsTimeoutRecoveryPending = true;
+            qWarning() << "[OpenHbbTV] inject key JS timeout recovery restart application" << keyCode;
+            emit hbbtvCommand(CommandClient::CommandRestartApplication,
+                              QStringLiteral("inject-key-js-timeout %1").arg(keyCode));
+        }
     });
 }
 
@@ -876,6 +967,8 @@ void WebView::titleChanged(const QString &title)
 void WebView::loadFinished(bool ok)
 {
     qDebug() << "[OpenHbbTV] loadFinished" << ok << url().toString();
+    if (ok)
+        m_jsTimeoutRecoveryPending = false;
     if (m_teletextReturnInProgress && ok && isInitialUrl(url())) {
         qDebug() << "[OpenHbbTV] teletext leading-zero return completed" << url().toString();
         m_teletextReturnInProgress = false;
