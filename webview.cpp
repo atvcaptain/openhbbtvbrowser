@@ -23,6 +23,7 @@ WebView::WebView(QWidget *parent)
     : QWebEngineView(parent)
     , m_streamState(0)
     , m_streamOverlayVisible(true)
+    , m_streamOverlayLowered(false)
     , m_streamOverlayHoldUntilMs(0)
     , m_streamOverlayGeometryValid(false)
     , m_jsTimeoutRecoveryPending(false)
@@ -74,14 +75,25 @@ void WebView::attachPageDiagnostics()
     m_diagnosticsPage = currentPage;
     connect(currentPage, &QWebEnginePage::renderProcessTerminated, this,
             [this](QWebEnginePage::RenderProcessTerminationStatus status, int exitCode) {
-                qWarning() << "[OpenHbbTV] renderProcessTerminated" << status << exitCode << url().toString();
-                if (!m_jsTimeoutRecoveryPending && !isStreamActive()) {
-                    m_jsTimeoutRecoveryPending = true;
-                    emit hbbtvCommand(CommandClient::CommandRestartApplication,
-                                      QStringLiteral("render-process-terminated"));
-                }
+                qWarning() << "[OpenHbbTV] renderProcessTerminated" << status << exitCode
+                           << "stream" << m_streamState << url().toString();
+                requestRestartApplicationOnce(QStringLiteral("render-process-terminated"));
             });
     qDebug() << "[OpenHbbTV] page diagnostics attached" << currentPage;
+}
+
+void WebView::requestRestartApplicationOnce(const QString &reason)
+{
+    if (m_jsTimeoutRecoveryPending) {
+        qWarning() << "[OpenHbbTV] restart application already pending" << reason
+                   << "stream" << m_streamState << "url" << url().toString();
+        return;
+    }
+
+    m_jsTimeoutRecoveryPending = true;
+    qWarning() << "[OpenHbbTV] restart application requested" << reason
+               << "stream" << m_streamState << "url" << url().toString();
+    emit hbbtvCommand(CommandClient::CommandRestartApplication, reason);
 }
 
 void WebView::runJavaScriptWithWatchdog(const QString &label, const QString &script, int timeoutMs, bool recoverOnTimeout)
@@ -96,11 +108,8 @@ void WebView::runJavaScriptWithWatchdog(const QString &label, const QString &scr
         if (*completed)
             return;
         qWarning() << "[OpenHbbTV] JS timeout" << label << "stream" << m_streamState << "url" << url().toString();
-        if (recoverOnTimeout && !m_jsTimeoutRecoveryPending && !isStreamActive()) {
-            m_jsTimeoutRecoveryPending = true;
-            qWarning() << "[OpenHbbTV] JS timeout recovery restart application" << label;
-            emit hbbtvCommand(CommandClient::CommandRestartApplication, QStringLiteral("js-timeout ") + label);
-        }
+        if (recoverOnTimeout)
+            requestRestartApplicationOnce(QStringLiteral("js-timeout ") + label);
     });
 }
 
@@ -334,6 +343,7 @@ void WebView::showApplicationOverlay(const QString &reason)
     const bool streamReason = isStreamActive() && reason.toLower().contains(QStringLiteral("stream"));
     const bool wasOverlayVisible = m_streamOverlayVisible;
     m_streamOverlayVisible = true;
+    m_streamOverlayLowered = false;
     if (isStreamActive())
         m_streamOverlayHoldUntilMs = QDateTime::currentMSecsSinceEpoch() + 2000;
 
@@ -406,6 +416,10 @@ void WebView::hideApplicationOverlay(const QString &reason)
         qDebug() << "[OpenHbbTV] skip auto hide while stream overlay is explicitly visible" << reason;
         return;
     }
+    if (reason.contains(QStringLiteral("auto hide")) && !m_streamOverlayVisible && m_streamOverlayLowered) {
+        qDebug() << "[OpenHbbTV] skip duplicate auto hide after browser already lowered" << reason;
+        return;
+    }
     m_streamOverlayVisible = false;
     if (!reason.contains(QStringLiteral("auto hide")))
         m_streamOverlayHoldUntilMs = 0;
@@ -453,6 +467,7 @@ void WebView::hideApplicationOverlay(const QString &reason)
             qDebug() << "[OpenHbbTV] lower browser window for stream without native hide" << reason
                      << top->geometry() << "visible" << top->isVisible();
         }
+        m_streamOverlayLowered = true;
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
     }
 }
@@ -890,12 +905,7 @@ void WebView::injectKeyEvent(int keyCode)
             return;
         qWarning() << "[OpenHbbTV] inject key JS timeout" << keyCode
                    << "stream" << m_streamState << "url" << url().toString();
-        if (!m_jsTimeoutRecoveryPending && !isStreamActive()) {
-            m_jsTimeoutRecoveryPending = true;
-            qWarning() << "[OpenHbbTV] inject key JS timeout recovery restart application" << keyCode;
-            emit hbbtvCommand(CommandClient::CommandRestartApplication,
-                              QStringLiteral("inject-key-js-timeout %1").arg(keyCode));
-        }
+        requestRestartApplicationOnce(QStringLiteral("inject-key-js-timeout %1").arg(keyCode));
     });
 }
 

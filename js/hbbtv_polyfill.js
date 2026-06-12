@@ -29941,9 +29941,20 @@ class OipfAVControlMapper {
         this.avControlObject = node;
         this.isDashVideo = isDashVideo;
 
-        this.originalDataAttribute = this.avControlObject.__openhbbtvOriginalDataAttribute || this.avControlObject.data || this.avControlObject.getAttribute('data') || "";
+        window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
+
+        this.originalDataAttribute = this.avControlObject.__openhbbtvOriginalDataAttribute || this.avControlObject.getAttribute('data') || this.avControlObject.data || "";
         this.avControlObject.__openhbbtvOriginalDataAttribute = this.originalDataAttribute;
-        this.avControlObject.data = "about:blank";
+        this.avControlObject.__openhbbtvDataBlanked = true;
+        this.avControlObject.__openhbbtvDataNativeSuppressed = true;
+        try {
+            if (window.HBBTV_POLYFILL_NS.suppressNativeObjectData) {
+                window.HBBTV_POLYFILL_NS.suppressNativeObjectData(this.avControlObject, this.originalDataAttribute, 'avcontrol constructor');
+            } else {
+                this.avControlObject.removeAttribute('data');
+            }
+        } catch (ignoreDataSuppress) {
+        }
         this.avControlObject.style.background = "transparent";
         this.avControlObject.playState = PLAY_STATES.stopped;
         this.avControlObject.playPosition = 0;
@@ -29951,7 +29962,6 @@ class OipfAVControlMapper {
         this.avControlObject.speed = 0;
         this.avControlObject.error = -1;
 
-        window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
         window.HBBTV_POLYFILL_NS.avControlObjects = window.HBBTV_POLYFILL_NS.avControlObjects || [];
         window.HBBTV_POLYFILL_NS.avControlCounter = window.HBBTV_POLYFILL_NS.avControlCounter || 0;
         this.avControlId = ++window.HBBTV_POLYFILL_NS.avControlCounter;
@@ -30068,9 +30078,15 @@ class OipfAVControlMapper {
         const blockNativeAvSurface = (reason) => {
             try {
                 const rawData = this.avControlObject.getAttribute ? (this.avControlObject.getAttribute('data') || '') : '';
-                if (rawData !== 'about:blank' && !this.avControlObject.__openhbbtvDataBlanked) {
-                    this.avControlObject.__openhbbtvDataBlanked = true;
-                    this.avControlObject.setAttribute('data', 'about:blank');
+                if (rawData && rawData !== 'about:blank') {
+                    this.avControlObject.__openhbbtvOriginalDataAttribute = this.avControlObject.__openhbbtvOriginalDataAttribute || rawData;
+                }
+                this.avControlObject.__openhbbtvDataBlanked = true;
+                this.avControlObject.__openhbbtvDataNativeSuppressed = true;
+                if (window.HBBTV_POLYFILL_NS && window.HBBTV_POLYFILL_NS.suppressNativeObjectData) {
+                    window.HBBTV_POLYFILL_NS.suppressNativeObjectData(this.avControlObject, this.avControlObject.__openhbbtvOriginalDataAttribute || rawData, 'avcontrol ' + reason);
+                } else if (rawData) {
+                    this.avControlObject.removeAttribute('data');
                 }
             } catch (ignoreAttr) {
             }
@@ -30143,12 +30159,15 @@ class OipfAVControlMapper {
             if (currentData && currentData !== 'about:blank') {
                 this.originalDataAttribute = currentData;
                 this.avControlObject.__openhbbtvOriginalDataAttribute = currentData;
-                if (rawData !== 'about:blank' && !this.avControlObject.__openhbbtvDataBlanked) {
-                    this.avControlObject.__openhbbtvDataBlanked = true;
-                    try {
-                        this.avControlObject.setAttribute('data', 'about:blank');
-                    } catch (ignoreBlank) {
+                this.avControlObject.__openhbbtvDataBlanked = true;
+                this.avControlObject.__openhbbtvDataNativeSuppressed = true;
+                try {
+                    if (window.HBBTV_POLYFILL_NS && window.HBBTV_POLYFILL_NS.suppressNativeObjectData) {
+                        window.HBBTV_POLYFILL_NS.suppressNativeObjectData(this.avControlObject, currentData, 'avcontrol updateOriginalDataAttribute');
+                    } else if (rawData) {
+                        this.avControlObject.removeAttribute('data');
                     }
+                } catch (ignoreBlank) {
                 }
             }
             return this.originalDataAttribute || this.avControlObject.__openhbbtvOriginalDataAttribute || '';
@@ -30238,12 +30257,15 @@ class OipfAVControlMapper {
                     const changed = this.originalDataAttribute !== currentData;
                     this.originalDataAttribute = currentData;
                     this.avControlObject.__openhbbtvOriginalDataAttribute = currentData;
-                    if (rawData !== 'about:blank' && !this.avControlObject.__openhbbtvDataBlanked) {
-                        this.avControlObject.__openhbbtvDataBlanked = true;
-                        try {
-                            this.avControlObject.setAttribute('data', 'about:blank');
-                        } catch (ignoreBlank) {
+                    this.avControlObject.__openhbbtvDataBlanked = true;
+                    this.avControlObject.__openhbbtvDataNativeSuppressed = true;
+                    try {
+                        if (window.HBBTV_POLYFILL_NS && window.HBBTV_POLYFILL_NS.suppressNativeObjectData) {
+                            window.HBBTV_POLYFILL_NS.suppressNativeObjectData(this.avControlObject, currentData, 'avcontrol mutation data');
+                        } else if (rawData) {
+                            this.avControlObject.removeAttribute('data');
                         }
+                    } catch (ignoreBlank) {
                     }
                     if (changed) {
                         if (window.signalopenhbbtvbrowser) {
@@ -31777,6 +31799,58 @@ class OipfVideoBroadcastMapper {
         return '';
     }
 
+    function suppressNativeObjectData(objectElement, url, reason) {
+        try {
+            if (!objectElement) {
+                return false;
+            }
+            var remembered = absoluteUrl(url || objectElement.__openhbbtvOriginalDataAttribute || objectElement.getAttribute && objectElement.getAttribute('data') || '');
+            if (remembered && remembered !== 'about:blank') {
+                objectElement.__openhbbtvOriginalDataAttribute = remembered;
+            }
+            objectElement.__openhbbtvDataBlanked = true;
+            objectElement.__openhbbtvDataNativeSuppressed = true;
+
+            if (!objectElement.__openhbbtvDataPropertyShadowed) {
+                try {
+                    Object.defineProperty(objectElement, 'data', {
+                        configurable: true,
+                        enumerable: true,
+                        get: function () {
+                            return this.__openhbbtvOriginalDataAttribute || '';
+                        },
+                        set: function (value) {
+                            var nextUrl = absoluteUrl(value || '');
+                            if (nextUrl && nextUrl !== 'about:blank') {
+                                this.__openhbbtvOriginalDataAttribute = nextUrl;
+                                rememberObjectMedia(this, nextUrl, 'object.data shadow setter');
+                            }
+                            suppressNativeObjectData(this, this.__openhbbtvOriginalDataAttribute || nextUrl, 'object.data shadow setter');
+                        }
+                    });
+                    objectElement.__openhbbtvDataPropertyShadowed = true;
+                    log('object.data native property shadowed reason=' + reason + ' url=' + (objectElement.__openhbbtvOriginalDataAttribute || ''));
+                } catch (shadowError) {
+                    log('object.data native property shadow failed reason=' + reason + ' error=' + shadowError);
+                }
+            }
+
+            try {
+                if (objectElement.getAttribute && objectElement.getAttribute('data') !== null) {
+                    objectElement.removeAttribute('data');
+                }
+            } catch (removeError) {
+                log('object.data native remove failed reason=' + reason + ' error=' + removeError);
+            }
+            return true;
+        } catch (error) {
+            log('object.data native suppress failed reason=' + reason + ' error=' + error);
+            return false;
+        }
+    }
+
+    ns.suppressNativeObjectData = suppressNativeObjectData;
+
     function routeObjectMediaToE2(url, reason, objectElement) {
         url = absoluteUrl(url || '');
         if (!isRoutableMediaUrl(url)) {
@@ -31789,6 +31863,7 @@ class OipfVideoBroadcastMapper {
         try {
             if (objectElement) {
                 objectElement.__openhbbtvOriginalDataAttribute = url;
+                suppressNativeObjectData(objectElement, url, 'routeObjectMediaToE2 ' + reason);
                 objectElement.style.background = 'transparent';
                 objectElement.style.opacity = '0';
                 objectElement.style.visibility = 'hidden';
@@ -31853,7 +31928,8 @@ class OipfVideoBroadcastMapper {
                 },
                 set: function (value) {
                     if (rememberObjectMedia(this, value, 'object.data setter')) {
-                        return dataDescriptor.set.call(this, 'about:blank');
+                        suppressNativeObjectData(this, value, 'object.data setter');
+                        return;
                     }
                     return dataDescriptor.set.call(this, value);
                 }
@@ -31882,14 +31958,15 @@ class OipfVideoBroadcastMapper {
                 if (tag === 'object' && attr === 'data') {
                     var objectUrl = absoluteUrl(value || '');
                     if (rememberObjectMedia(this, objectUrl, 'object.setAttribute data')) {
-                        value = 'about:blank';
+                        suppressNativeObjectData(this, objectUrl, 'object.setAttribute data');
+                        return;
                     }
                 }
                 if (tag === 'object' && attr === 'type') {
                     var currentData = this.__openhbbtvOriginalDataAttribute || this.data || this.getAttribute && this.getAttribute('data') || '';
                     if (shouldRouteObjectMedia(value, currentData)) {
                         this.__openhbbtvOriginalDataAttribute = absoluteUrl(currentData);
-                        nativeSetAttribute.call(this, 'data', 'about:blank');
+                        suppressNativeObjectData(this, this.__openhbbtvOriginalDataAttribute, 'object.setAttribute type');
                         log('object.setAttribute type guarded type=' + value + ' url=' + this.__openhbbtvOriginalDataAttribute);
                         routeObjectMediaToE2(this.__openhbbtvOriginalDataAttribute, 'object.setAttribute type', this);
                     }
@@ -31899,12 +31976,12 @@ class OipfVideoBroadcastMapper {
                     if (isRoutableMediaUrl(mediaUrl)) {
                         log(tag + '.setAttribute src media=' + mediaUrl);
                         if (isManifestUrl(mediaUrl)) { rememberManifestUrl(mediaUrl, tag + '.setAttribute'); }
+                        var video = tag === 'video' ? this : (this.parentNode && this.parentNode.tagName && String(this.parentNode.tagName).toLowerCase() === 'video' ? this.parentNode : null);
                         if (pageLooksLikeVodPlayback() || isProgressiveMediaUrl(mediaUrl) || isActiveMediaSwitch(mediaUrl)) {
-                            var video = tag === 'video' ? this : (this.parentNode && this.parentNode.tagName && String(this.parentNode.tagName).toLowerCase() === 'video' ? this.parentNode : null);
-                            if (routeManifestToE2(mediaUrl, tag + '.setAttribute', video)) {
-                                value = '';
-                            }
+                            routeManifestToE2(mediaUrl, tag + '.setAttribute', video);
                         }
+                        blockNativeVideo(video, tag + '.setAttribute blocked native Qt player');
+                        value = '';
                     }
                 }
             } catch (ignore) {
@@ -32006,6 +32083,11 @@ class OipfVideoBroadcastMapper {
                 if (url && routeManifestToE2(url, 'video.play', this)) {
                     return Promise.resolve();
                 }
+                if (url && isRoutableMediaUrl(url)) {
+                    blockNativeVideo(this, 'video.play blocked native Qt player');
+                    log('video.play native Qt player blocked without E2 start url=' + url);
+                    return Promise.resolve();
+                }
             }
             return nativePlay ? nativePlay.apply(this, arguments) : undefined;
         };
@@ -32016,8 +32098,12 @@ class OipfVideoBroadcastMapper {
                 var url = findVideoUrl(this);
                 if (url) {
                     log('video.load manifest=' + url);
-                    if (pageLooksLikeVodPlayback() || isActiveMediaSwitch(url)) {
+                    if (pageLooksLikeVodPlayback() || isProgressiveMediaUrl(url) || isActiveMediaSwitch(url)) {
                         routeManifestToE2(url, 'video.load', this);
+                    }
+                    if (isRoutableMediaUrl(url)) {
+                        blockNativeVideo(this, 'video.load blocked native Qt player');
+                        return;
                     }
                 }
             }
@@ -32036,10 +32122,11 @@ class OipfVideoBroadcastMapper {
                         var url = absoluteUrl(value || '');
                         if (this.tagName && String(this.tagName).toLowerCase() === 'video' && isRoutableMediaUrl(url)) {
                             log('video.src set manifest=' + url);
-                            if (pageLooksLikeVodPlayback() || isActiveMediaSwitch(url)) {
+                            if (pageLooksLikeVodPlayback() || isProgressiveMediaUrl(url) || isActiveMediaSwitch(url)) {
                                 routeManifestToE2(url, 'video.src', this);
-                                value = '';
                             }
+                            blockNativeVideo(this, 'video.src blocked native Qt player');
+                            value = '';
                         }
                         return srcDescriptor.set.call(this, value);
                     }
@@ -32061,14 +32148,15 @@ class OipfVideoBroadcastMapper {
                             this.__openhbbtvOriginalDataAttribute = objectUrl;
                             log('object.setAttribute data guarded type=' + objectType + ' url=' + objectUrl);
                             routeObjectMediaToE2(objectUrl, 'video-interceptor object.setAttribute data', this);
-                            value = 'about:blank';
+                            suppressNativeObjectData(this, objectUrl, 'video-interceptor object.setAttribute data');
+                            return;
                         }
                     }
                     if (tag === 'object' && attr === 'type') {
                         var currentData = this.__openhbbtvOriginalDataAttribute || this.data || this.getAttribute && this.getAttribute('data') || '';
                         if (isOipfMediaType(value) && isRoutableMediaUrl(currentData)) {
                             this.__openhbbtvOriginalDataAttribute = absoluteUrl(currentData);
-                            nativeSetAttribute.call(this, 'data', 'about:blank');
+                            suppressNativeObjectData(this, this.__openhbbtvOriginalDataAttribute, 'video-interceptor object.setAttribute type');
                             log('object.setAttribute type guarded type=' + value + ' url=' + this.__openhbbtvOriginalDataAttribute);
                             routeObjectMediaToE2(this.__openhbbtvOriginalDataAttribute, 'video-interceptor object.setAttribute type', this);
                         }
@@ -32078,11 +32166,12 @@ class OipfVideoBroadcastMapper {
                         if (isRoutableMediaUrl(url)) {
                             log(tag + '.setAttribute src media=' + url);
                             if (isManifestUrl(url)) { rememberManifestUrl(url, tag + '.setAttribute'); }
-                            if (pageLooksLikeVodPlayback() || isActiveMediaSwitch(url)) {
-                                var video = tag === 'video' ? this : (this.parentNode && this.parentNode.tagName && String(this.parentNode.tagName).toLowerCase() === 'video' ? this.parentNode : null);
+                            var video = tag === 'video' ? this : (this.parentNode && this.parentNode.tagName && String(this.parentNode.tagName).toLowerCase() === 'video' ? this.parentNode : null);
+                            if (pageLooksLikeVodPlayback() || isProgressiveMediaUrl(url) || isActiveMediaSwitch(url)) {
                                 routeManifestToE2(url, tag + '.setAttribute', video);
-                                value = '';
                             }
+                            blockNativeVideo(video, tag + '.setAttribute blocked native Qt player');
+                            value = '';
                         }
                     }
                 } catch (ignore) {
@@ -32110,10 +32199,11 @@ class OipfVideoBroadcastMapper {
                             if (isRoutableMediaUrl(url)) {
                                 log('mutation src tag=' + tag + ' media=' + url);
                                 if (isManifestUrl(url)) { rememberManifestUrl(url, 'mutation-' + tag); }
+                                var video = tag === 'video' ? target : (target.parentNode && target.parentNode.tagName && String(target.parentNode.tagName).toLowerCase() === 'video' ? target.parentNode : null);
                                 if (pageLooksLikeVodPlayback() || isProgressiveMediaUrl(url) || isActiveMediaSwitch(url)) {
-                                    var video = tag === 'video' ? target : (target.parentNode && target.parentNode.tagName && String(target.parentNode.tagName).toLowerCase() === 'video' ? target.parentNode : null);
                                     routeManifestToE2(url, 'mutation-' + tag, video);
                                 }
+                                blockNativeVideo(video, 'mutation-' + tag + ' blocked native Qt player');
                             }
                         }
                         if (tag === 'object' && (attrName === 'data' || attrName === 'type')) {
@@ -32124,10 +32214,7 @@ class OipfVideoBroadcastMapper {
                             }
                             if (rememberObjectMedia(target, objectUrl, 'mutation-object-' + attrName)) {
                                 try {
-                                    if (rawObjectData !== 'about:blank' && !target.__openhbbtvDataBlanked) {
-                                        target.__openhbbtvDataBlanked = true;
-                                        target.setAttribute('data', 'about:blank');
-                                    }
+                                    suppressNativeObjectData(target, objectUrl, 'mutation-object-' + attrName);
                                 } catch (ignoreBlank) {}
                             }
                         }
@@ -32145,13 +32232,14 @@ class OipfVideoBroadcastMapper {
                                     log('added ' + source.tagName + ' media=' + url);
                                     if (tagName === 'object') {
                                         rememberObjectMedia(source, url, 'added-object');
-                                        try { source.setAttribute('data', 'about:blank'); } catch (ignoreAddedBlank) {}
+                                        try { suppressNativeObjectData(source, url, 'added-object'); } catch (ignoreAddedBlank) {}
                                     } else {
                                         if (isManifestUrl(url)) { rememberManifestUrl(url, 'added-' + source.tagName); }
+                                        var video = tagName === 'video' ? source : (source.parentNode && source.parentNode.tagName && String(source.parentNode.tagName).toLowerCase() === 'video' ? source.parentNode : null);
                                         if (pageLooksLikeVodPlayback() || isProgressiveMediaUrl(url) || isActiveMediaSwitch(url)) {
-                                            var video = tagName === 'video' ? source : (source.parentNode && source.parentNode.tagName && String(source.parentNode.tagName).toLowerCase() === 'video' ? source.parentNode : null);
                                             routeManifestToE2(url, 'added-' + source.tagName, video);
                                         }
+                                        blockNativeVideo(video, 'added-' + source.tagName + ' blocked native Qt player');
                                     }
                                 }
                             });

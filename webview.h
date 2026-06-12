@@ -21,20 +21,13 @@ public:
 
     void interceptRequest(QWebEngineUrlRequestInfo &info) override {
         const QUrl requestUrl = info.requestUrl();
-        const QString path = requestUrl.path().toLower();
         const QString url = requestUrl.toString(QUrl::FullyEncoded);
         const QWebEngineUrlRequestInfo::ResourceType type = info.resourceType();
-        const bool mediaExtension = path.endsWith(QStringLiteral(".mp4")) ||
-                                    path.endsWith(QStringLiteral(".m4v")) ||
-                                    path.endsWith(QStringLiteral(".mov")) ||
-                                    path.endsWith(QStringLiteral(".webm")) ||
-                                    path.endsWith(QStringLiteral(".m3u8")) ||
-                                    path.endsWith(QStringLiteral(".mpd"));
         const bool nativeMediaRequest = type == QWebEngineUrlRequestInfo::ResourceTypeMedia ||
                                         type == QWebEngineUrlRequestInfo::ResourceTypeObject;
 
-        if (nativeMediaRequest && mediaExtension) {
-            qWarning().noquote() << "[OpenHbbTV] blocked native Qt media request"
+        if (nativeMediaRequest) {
+            qWarning().noquote() << "[OpenHbbTV] blocked native Qt media/object request"
                                  << info.requestMethod()
                                  << type
                                  << url;
@@ -100,6 +93,7 @@ private:
     void repaintOverlaySurface(const QString &reason);
     void retryOverlayRepaint(const QString &reason, int delayMs);
     void retryStreamOverlayVisible(const QString &reason, int delayMs);
+    void requestRestartApplicationOnce(const QString &reason);
     bool isInitialUrl(const QUrl &candidate) const;
     void injectKeyEvent(int keyCode);
     bool nativeNavigationKeysEnabled() const;
@@ -109,6 +103,7 @@ private:
     QString m_lastBroadcastInfo;
     int m_streamState;
     bool m_streamOverlayVisible;
+    bool m_streamOverlayLowered;
     qint64 m_streamOverlayHoldUntilMs;
     QRect m_streamOverlaySavedGeometry;
     bool m_streamOverlayGeometryValid;
