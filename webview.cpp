@@ -419,9 +419,13 @@ void WebView::showApplicationOverlay(const QString &reason)
 void WebView::hideApplicationOverlay(const QString &reason)
 {
     const QString reasonLower = reason.toLower();
-    const bool preStreamLiveHide = reasonLower.contains(QStringLiteral("live-dash"))
-        || reasonLower.contains(QStringLiteral("live stream"));
-    if (!isStreamActive() && !preStreamLiveHide)
+    const bool preStreamHide = reasonLower.contains(QStringLiteral("playstreamrequest"))
+        || reasonLower.contains(QStringLiteral("hard restart stream"))
+        || reasonLower.contains(QStringLiteral("live-dash"))
+        || reasonLower.contains(QStringLiteral("live stream"))
+        || reasonLower.contains(QStringLiteral("vod-native-hide"))
+        || reasonLower.contains(QStringLiteral("native-hide"));
+    if (!isStreamActive() && !preStreamHide)
         return;
     if (reasonLower.contains(QStringLiteral("auto hide")) && m_streamOverlayVisible && QDateTime::currentMSecsSinceEpoch() < m_streamOverlayHoldUntilMs) {
         qDebug() << "[OpenHbbTV] skip auto hide while stream overlay is explicitly visible" << reason;
@@ -462,9 +466,9 @@ void WebView::hideApplicationOverlay(const QString &reason)
             || hideMode == QStringLiteral("safe");
 
         if (nativeHide) {
-            // Diagnostic fallback only. On Vu+/eglfs_libvupl this is the path
-            // that can produce a one-frame flash on OK and then leave the native
-            // surface invisible while Qt still reports visible=true.
+            // Native hide is needed on Vu+/eglfs_libvupl when alpha is disabled:
+            // lower() keeps the opaque browser surface above the E2 video plane.
+            // showApplicationOverlay() recreates and raises the surface for OK/UI.
             top->lower();
             if (top->isVisible()) {
                 top->hide();
