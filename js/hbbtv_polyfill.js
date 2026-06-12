@@ -30721,8 +30721,8 @@ const hbbtvFn = function () {
     };
 
     Application.prototype.show = function () {
-        // Do not log Application.show: E2 treats visibility as layer state,
-        // and echoing app.show() can create a SHOW_APPLICATION feedback loop.
+        // Do not log Application.show: the browser visibility state is owned by E2.
+        // Logging this creates SHOW_APPLICATION feedback loops on eglfs/libvupl.
         if (this._document) {
             this._document.body.style.visibility = 'visible';
             return (this._visible = true);
@@ -32174,7 +32174,7 @@ class OipfVideoBroadcastMapper {
     if (typeof window !== 'object' || typeof document !== 'object') {
         return;
     }
-    if (window.__openhbbtvInjectKey && window.__openhbbtvInjectKey.__openhbbtvBrokerVersion >= 3) {
+    if (window.__openhbbtvInjectKey && window.__openhbbtvInjectKey.__openhbbtvBrokerVersion >= 2) {
         return;
     }
     function send(command) {
@@ -32209,18 +32209,10 @@ class OipfVideoBroadcastMapper {
         }
     }
     function resolveCode(code, vkName) {
-        // The backend already sends the HbbTV virtual key code. Some HbbTV
-        // pages define window.VK_YELLOW / VK_RED with browser or function-key
-        // values (for example 118). Do not let page globals override the
-        // backend-provided HbbTV code, otherwise colour keys stop matching
-        // the registered HbbTV keyset after page navigation or VOD start.
         var resolved = parseInt(code, 10) || 0;
-        if (resolved > 0) {
-            return resolved;
-        }
         try {
             if (vkName && typeof window[vkName] !== 'undefined') {
-                resolved = parseInt(window[vkName], 10) || 0;
+                resolved = parseInt(window[vkName], 10) || resolved;
             }
         } catch (ignore) {
         }
@@ -32274,7 +32266,7 @@ class OipfVideoBroadcastMapper {
             try { target.dispatchEvent(makeEvent('keyup', code, vkName)); }
             catch (e2) { send('LOG:InjectedKey keyup failed target=' + describe(target) + ' error=' + e2); }
         }, 25);
-        send('LOG:InjectedKey broker v3 target=' + describe(target) + ' active=' + describe(document.activeElement) + ' hbbtvCode=' + code + ' vk=' + (vkName || '') + ' legacyKey=' + key + ' defaultPrevented=' + (!downResult));
+        send('LOG:InjectedKey broker v2 target=' + describe(target) + ' active=' + describe(document.activeElement) + ' key=' + code + ' vk=' + (vkName || '') + ' legacyKey=' + key + ' accepted=' + (!!downResult));
     }
     window.__openhbbtvInjectKey = function (code, vkName) {
         var resolved = resolveCode(code, vkName);
@@ -32289,7 +32281,7 @@ class OipfVideoBroadcastMapper {
         dispatchPair(target, resolved, vkName);
         return true;
     };
-    window.__openhbbtvInjectKey.__openhbbtvBrokerVersion = 3;
+    window.__openhbbtvInjectKey.__openhbbtvBrokerVersion = 2;
 }());
 
 //# sourceMappingURL=hbbtv_polyfill.js.map
