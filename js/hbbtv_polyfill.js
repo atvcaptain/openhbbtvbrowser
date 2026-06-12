@@ -31023,10 +31023,10 @@ const keyEventInit = function () {
     window.KeyEvent.VK_7 = typeof window.KeyEvent.VK_7 !== "undefined" ? window.KeyEvent.VK_7 : 55;
     window.KeyEvent.VK_8 = typeof window.KeyEvent.VK_8 !== "undefined" ? window.KeyEvent.VK_8 : 56;
     window.KeyEvent.VK_9 = typeof window.KeyEvent.VK_9 !== "undefined" ? window.KeyEvent.VK_9 : 57;
-    window.KeyEvent.VK_RED = typeof window.KeyEvent.VK_RED !== "undefined" ? window.KeyEvent.VK_RED : 403;
-    window.KeyEvent.VK_GREEN = typeof window.KeyEvent.VK_GREEN !== "undefined" ? window.KeyEvent.VK_GREEN : 404;
-    window.KeyEvent.VK_YELLOW = typeof window.KeyEvent.VK_YELLOW !== "undefined" ? window.KeyEvent.VK_YELLOW : 405;
-    window.KeyEvent.VK_BLUE = typeof window.KeyEvent.VK_BLUE !== "undefined" ? window.KeyEvent.VK_BLUE : 406;
+    window.KeyEvent.VK_RED = 403;
+    window.KeyEvent.VK_GREEN = 404;
+    window.KeyEvent.VK_YELLOW = 405;
+    window.KeyEvent.VK_BLUE = 406;
     window.KeyEvent.VK_REWIND = typeof window.KeyEvent.VK_REWIND !== "undefined" ? window.KeyEvent.VK_REWIND : 412;
     window.KeyEvent.VK_STOP = typeof window.KeyEvent.VK_STOP !== "undefined" ? window.KeyEvent.VK_STOP : 413;
     window.KeyEvent.VK_PLAY = typeof window.KeyEvent.VK_PLAY !== "undefined" ? window.KeyEvent.VK_PLAY : 415;
@@ -31052,10 +31052,10 @@ const keyEventInit = function () {
     window.VK_7 = typeof window.VK_7 !== "undefined" ? window.VK_7 : 55;
     window.VK_8 = typeof window.VK_8 !== "undefined" ? window.VK_8 : 56;
     window.VK_9 = typeof window.VK_9 !== "undefined" ? window.VK_9 : 57;
-    window.VK_RED = typeof window.VK_RED !== "undefined" ? window.VK_RED : 403;
-    window.VK_GREEN = typeof window.VK_GREEN !== "undefined" ? window.VK_GREEN : 404;
-    window.VK_YELLOW = typeof window.VK_YELLOW !== "undefined" ? window.VK_YELLOW : 405;
-    window.VK_BLUE = typeof window.VK_BLUE !== "undefined" ? window.VK_BLUE : 406;
+    window.VK_RED = 403;
+    window.VK_GREEN = 404;
+    window.VK_YELLOW = 405;
+    window.VK_BLUE = 406;
     window.VK_REWIND = typeof window.VK_REWIND !== "undefined" ? window.VK_REWIND : 412;
     window.VK_STOP = typeof window.VK_STOP !== "undefined" ? window.VK_STOP : 413;
     window.VK_PLAY = typeof window.VK_PLAY !== "undefined" ? window.VK_PLAY : 415;
@@ -31634,6 +31634,18 @@ class OipfVideoBroadcastMapper {
         return 'id=' + session.id + ' state=' + session.state + ' source=' + session.source + ' url=' + session.url;
     }
 
+    function isActiveMediaSwitch(url) {
+        url = absoluteUrl(url || '');
+        var session = ns.openHbbtvMediaSession;
+        return !!(session && session.state !== 'stopped' && isRoutableMediaUrl(url) && !sameMediaUrl(session.url, url));
+    }
+
+    function shouldRouteManifestUrl(url) {
+        return pageLooksLikeVodPlayback() ||
+            (Date.now() - (ns.html5VodPendingPlayAt || 0)) < 6000 ||
+            isActiveMediaSwitch(url);
+    }
+
     function startOrReuseMediaSession(url, reason, video, manifestText) {
         url = absoluteUrl(url);
         if (!isRoutableMediaUrl(url)) {
@@ -31725,7 +31737,7 @@ class OipfVideoBroadcastMapper {
         ns.html5VodLastManifestAt = Date.now();
         ns.html5VodLastManifestSource = source || '';
         log('manifest seen source=' + source + ' url=' + url + ' vodPage=' + pageLooksLikeVodPlayback());
-        if (pageLooksLikeVodPlayback() || (Date.now() - (ns.html5VodPendingPlayAt || 0)) < 6000) {
+        if (shouldRouteManifestUrl(url)) {
             routeManifestToE2(url, 'manifest ' + source, null, manifestText);
         }
     }
@@ -31859,7 +31871,7 @@ class OipfVideoBroadcastMapper {
                     if (isRoutableMediaUrl(mediaUrl)) {
                         log(tag + '.setAttribute src media=' + mediaUrl);
                         if (isManifestUrl(mediaUrl)) { rememberManifestUrl(mediaUrl, tag + '.setAttribute'); }
-                        if (pageLooksLikeVodPlayback() || isProgressiveMediaUrl(mediaUrl)) {
+                        if (pageLooksLikeVodPlayback() || isProgressiveMediaUrl(mediaUrl) || isActiveMediaSwitch(mediaUrl)) {
                             var video = tag === 'video' ? this : (this.parentNode && this.parentNode.tagName && String(this.parentNode.tagName).toLowerCase() === 'video' ? this.parentNode : null);
                             if (routeManifestToE2(mediaUrl, tag + '.setAttribute', video)) {
                                 value = '';
@@ -31976,7 +31988,7 @@ class OipfVideoBroadcastMapper {
                 var url = findVideoUrl(this);
                 if (url) {
                     log('video.load manifest=' + url);
-                    if (pageLooksLikeVodPlayback()) {
+                    if (pageLooksLikeVodPlayback() || isActiveMediaSwitch(url)) {
                         routeManifestToE2(url, 'video.load', this);
                     }
                 }
@@ -31996,7 +32008,7 @@ class OipfVideoBroadcastMapper {
                         var url = absoluteUrl(value || '');
                         if (this.tagName && String(this.tagName).toLowerCase() === 'video' && isRoutableMediaUrl(url)) {
                             log('video.src set manifest=' + url);
-                            if (pageLooksLikeVodPlayback()) {
+                            if (pageLooksLikeVodPlayback() || isActiveMediaSwitch(url)) {
                                 routeManifestToE2(url, 'video.src', this);
                                 value = '';
                             }
@@ -32038,7 +32050,7 @@ class OipfVideoBroadcastMapper {
                         if (isRoutableMediaUrl(url)) {
                             log(tag + '.setAttribute src media=' + url);
                             if (isManifestUrl(url)) { rememberManifestUrl(url, tag + '.setAttribute'); }
-                            if (pageLooksLikeVodPlayback()) {
+                            if (pageLooksLikeVodPlayback() || isActiveMediaSwitch(url)) {
                                 var video = tag === 'video' ? this : (this.parentNode && this.parentNode.tagName && String(this.parentNode.tagName).toLowerCase() === 'video' ? this.parentNode : null);
                                 routeManifestToE2(url, tag + '.setAttribute', video);
                                 value = '';
@@ -32070,7 +32082,7 @@ class OipfVideoBroadcastMapper {
                             if (isRoutableMediaUrl(url)) {
                                 log('mutation src tag=' + tag + ' media=' + url);
                                 if (isManifestUrl(url)) { rememberManifestUrl(url, 'mutation-' + tag); }
-                                if (pageLooksLikeVodPlayback() || isProgressiveMediaUrl(url)) {
+                                if (pageLooksLikeVodPlayback() || isProgressiveMediaUrl(url) || isActiveMediaSwitch(url)) {
                                     var video = tag === 'video' ? target : (target.parentNode && target.parentNode.tagName && String(target.parentNode.tagName).toLowerCase() === 'video' ? target.parentNode : null);
                                     routeManifestToE2(url, 'mutation-' + tag, video);
                                 }
@@ -32108,7 +32120,7 @@ class OipfVideoBroadcastMapper {
                                         try { source.setAttribute('data', 'about:blank'); } catch (ignoreAddedBlank) {}
                                     } else {
                                         if (isManifestUrl(url)) { rememberManifestUrl(url, 'added-' + source.tagName); }
-                                        if (pageLooksLikeVodPlayback() || isProgressiveMediaUrl(url)) {
+                                        if (pageLooksLikeVodPlayback() || isProgressiveMediaUrl(url) || isActiveMediaSwitch(url)) {
                                             var video = tagName === 'video' ? source : (source.parentNode && source.parentNode.tagName && String(source.parentNode.tagName).toLowerCase() === 'video' ? source.parentNode : null);
                                             routeManifestToE2(url, 'added-' + source.tagName, video);
                                         }
@@ -32174,7 +32186,7 @@ class OipfVideoBroadcastMapper {
     if (typeof window !== 'object' || typeof document !== 'object') {
         return;
     }
-    if (window.__openhbbtvInjectKey && window.__openhbbtvInjectKey.__openhbbtvBrokerVersion >= 2) {
+    if (window.__openhbbtvInjectKey && window.__openhbbtvInjectKey.__openhbbtvBrokerVersion >= 3) {
         return;
     }
     function send(command) {
@@ -32209,9 +32221,19 @@ class OipfVideoBroadcastMapper {
         }
     }
     function resolveCode(code, vkName) {
-        var resolved = parseInt(code, 10) || 0;
+        var parsed = parseInt(code, 10);
+        if (!isNaN(parsed) && parsed > 0) {
+            return parsed;
+        }
+        var resolved = 0;
         try {
-            if (vkName && typeof window[vkName] !== 'undefined') {
+            if (vkName && window.KeyEvent && typeof window.KeyEvent[vkName] !== 'undefined') {
+                resolved = parseInt(window.KeyEvent[vkName], 10) || resolved;
+            }
+        } catch (ignoreKeyEvent) {
+        }
+        try {
+            if (!resolved && vkName && typeof window[vkName] !== 'undefined') {
                 resolved = parseInt(window[vkName], 10) || resolved;
             }
         } catch (ignore) {
@@ -32266,7 +32288,7 @@ class OipfVideoBroadcastMapper {
             try { target.dispatchEvent(makeEvent('keyup', code, vkName)); }
             catch (e2) { send('LOG:InjectedKey keyup failed target=' + describe(target) + ' error=' + e2); }
         }, 25);
-        send('LOG:InjectedKey broker v2 target=' + describe(target) + ' active=' + describe(document.activeElement) + ' key=' + code + ' vk=' + (vkName || '') + ' legacyKey=' + key + ' accepted=' + (!!downResult));
+        send('LOG:InjectedKey broker v3 target=' + describe(target) + ' active=' + describe(document.activeElement) + ' key=' + code + ' vk=' + (vkName || '') + ' legacyKey=' + key + ' accepted=' + (!!downResult));
     }
     window.__openhbbtvInjectKey = function (code, vkName) {
         var resolved = resolveCode(code, vkName);
@@ -32281,7 +32303,7 @@ class OipfVideoBroadcastMapper {
         dispatchPair(target, resolved, vkName);
         return true;
     };
-    window.__openhbbtvInjectKey.__openhbbtvBrokerVersion = 2;
+    window.__openhbbtvInjectKey.__openhbbtvBrokerVersion = 3;
 }());
 
 //# sourceMappingURL=hbbtv_polyfill.js.map
