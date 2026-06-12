@@ -45,6 +45,8 @@ WebView::WebView(QWidget *parent)
 
     setCursor(Qt::BlankCursor);
     setMouseTracking(false);
+    setAttribute(Qt::WA_TranslucentBackground, true);
+    setStyleSheet(QStringLiteral("background: transparent;"));
 
     m_teletextDigitTimer->setSingleShot(true);
     m_teletextDigitTimer->setInterval(1200);
