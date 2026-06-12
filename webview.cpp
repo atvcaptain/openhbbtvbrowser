@@ -468,9 +468,9 @@ void WebView::hideApplicationOverlay(const QString &reason)
             || hideMode == QStringLiteral("safe");
 
         if (nativeHide) {
-            // Native hide is needed on Vu+/eglfs_libvupl when alpha is disabled:
-            // lower() keeps the opaque browser surface above the E2 video plane.
-            // showApplicationOverlay() recreates and raises the surface for OK/UI.
+            // Diagnostic opt-in. On Vu+/eglfs_libvupl with alpha enabled,
+            // top-level hide maps to VUGLES_SetVisible(false) and can crash the
+            // WebEngine renderer. The launcher defaults to lower/transparent.
             top->lower();
             if (top->isVisible()) {
                 top->hide();
