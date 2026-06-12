@@ -25,6 +25,16 @@ static bool isFalseValue(QByteArray value)
         || value == QByteArrayLiteral("disabled");
 }
 
+static bool isTrueValue(QByteArray value)
+{
+    value = value.trimmed().toLower();
+    return value == QByteArrayLiteral("1")
+        || value == QByteArrayLiteral("yes")
+        || value == QByteArrayLiteral("true")
+        || value == QByteArrayLiteral("on")
+        || value == QByteArrayLiteral("enabled");
+}
+
 static bool openHbbTVDebugEnabled()
 {
     const QByteArray env = qgetenv("OPENHBBTV_DEBUG");
@@ -99,7 +109,9 @@ void installOpenHbbTVDebugLogger()
     g_logPath = QString::fromLocal8Bit(envPath.isEmpty() ? QByteArrayLiteral("/tmp/openhbbtvbrowser-debug.log") : envPath);
 
     QFile file(g_logPath);
-    if (file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+    const QIODevice::OpenMode mode = isTrueValue(qgetenv("OPENHBBTV_LOG_TRUNCATE"))
+            ? QIODevice::Truncate : QIODevice::Append;
+    if (file.open(QIODevice::WriteOnly | mode | QIODevice::Text)) {
         QTextStream out(&file);
         out << "===== OpenHbbTV browser start "
             << QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd hh:mm:ss.zzz"))
