@@ -259,12 +259,26 @@ void WebView::retryStreamOverlayVisible(const QString &reason, int delayMs)
 
 void WebView::showApplicationOverlay(const QString &reason)
 {
+    const bool streamReason = isStreamActive() && reason.toLower().contains(QStringLiteral("stream"));
+    const bool wasOverlayVisible = m_streamOverlayVisible;
     m_streamOverlayVisible = true;
     if (isStreamActive())
         m_streamOverlayHoldUntilMs = QDateTime::currentMSecsSinceEpoch() + 2000;
-    qDebug() << "[OpenHbbTV] show application overlay" << reason;
+
+    qDebug() << "[OpenHbbTV] show application overlay" << reason
+             << "streamReason" << streamReason << "wasVisible" << wasOverlayVisible;
+
     QWidget *top = window();
-    if (top) {
+    const bool duplicateVisibleStreamOverlay = streamReason && wasOverlayVisible && top && top->isVisible();
+    if (duplicateVisibleStreamOverlay) {
+        // The first overlay transition must raise/focus the EGL surface. Repeating
+        // the same operation on every OK/key press schedules many native retries
+        // and can leave shifted/transparent fragments on libvupl/eglfs. Keep the
+        // JavaScript/app visibility refresh below, but do not touch native layer
+        // geometry again for duplicate visible stream overlay requests.
+        qDebug() << "[OpenHbbTV] skip duplicate stream overlay native refresh" << reason
+                 << top->geometry() << "visible" << top->isVisible();
+    } else if (top) {
         if (m_streamOverlayGeometryValid) {
             top->setGeometry(m_streamOverlaySavedGeometry);
             qDebug() << "[OpenHbbTV] restore browser window geometry" << m_streamOverlaySavedGeometry << reason;
@@ -288,7 +302,7 @@ void WebView::showApplicationOverlay(const QString &reason)
         }
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
     }
-    if (isStreamActive() && reason.toLower().contains(QStringLiteral("stream"))) {
+    if (streamReason && !duplicateVisibleStreamOverlay) {
         retryStreamOverlayVisible(reason, 120);
         retryStreamOverlayVisible(reason, 450);
         retryStreamOverlayVisible(reason, 900);
@@ -296,13 +310,21 @@ void WebView::showApplicationOverlay(const QString &reason)
     page()->runJavaScript(QString::fromLatin1(
         "(function() {"
         "  try { if (document.documentElement) document.documentElement.style.visibility = 'visible'; } catch (e) {}"
-        "  try { if (document.body) { document.body.style.visibility = 'visible'; document.body.style.display = ''; document.body.style.opacity = '1'; if (document.body.focus) document.body.focus(); } } catch (e) {}"
+        "  try { if (document.body) { document.body.style.visibility = 'visible'; document.body.style.display = ''; document.body.style.opacity = '1'; } } catch (e) {}"
         "  try {"
         "    if (window.oipfApplicationManager && window.oipfApplicationManager.getOwnerApplication) {"
         "      var app = window.oipfApplicationManager.getOwnerApplication(document);"
-        "      if (app) app._visible = true;"
+        "      if (app) {"
+        "        app._visible = true;"
+        "        if (typeof app.show === 'function' && !window.__openhbbtvOverlayShowGuard) {"
+        "          window.__openhbbtvOverlayShowGuard = true;"
+        "          try { app.show(); } catch (showError) {}"
+        "          setTimeout(function() { window.__openhbbtvOverlayShowGuard = false; }, 0);"
+        "        }"
+        "      }"
         "    }"
         "  } catch (e) {}"
+        "  try { window.focus && window.focus(); } catch (e) {}"
         "  try { window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('focus')); } catch (e) {}"
         "})();"));
 }
@@ -722,7 +744,7 @@ void WebView::injectKeyEvent(int keyCode)
                                     "    try { window.__openhbbtvInjectKey(code, vkName); return; }"
                                     "    catch (brokerError) { console.log('OpenHbbTV key broker failed', brokerError); }"
                                     "  }"
-                                    "  var resolved = (typeof window[vkName] !== 'undefined') ? window[vkName] : code;"
+                                    "  var resolved = parseInt(code, 10) || 0; if (!resolved && typeof window[vkName] !== 'undefined') resolved = parseInt(window[vkName], 10) || 0;"
                                     "  var target = document.body || document.documentElement || document.activeElement || document;"
                                     "  try { if (target && target.focus) target.focus(); } catch (ignore) {}"
                                     "  function keyName(value) {"
