@@ -16,6 +16,7 @@
 #include <QDateTime>
 #include <QCoreApplication>
 #include <QPointer>
+#include <QVariant>
 
 WebView::WebView(QWidget *parent)
     : QWebEngineView(parent)
@@ -731,9 +732,27 @@ void WebView::injectKeyEvent(int keyCode)
     QString s = QString::fromLatin1("(function() {"
                                     "  var code = %1;"
                                     "  var vkName = '%2';"
+                                    "  function describe(target) {"
+                                    "    try {"
+                                    "      if (!target) return 'null';"
+                                    "      var tag = target.tagName || target.nodeName || typeof target;"
+                                    "      var id = target.id ? ('#' + target.id) : '';"
+                                    "      var cls = target.className ? ('.' + String(target.className).replace(/\\s+/g, '.').slice(0, 60)) : '';"
+                                    "      return tag + id + cls;"
+                                    "    } catch (ignore) { return 'unknown'; }"
+                                    "  }"
+                                    "  function sendLog(message) {"
+                                    "    try { if (window.signalopenhbbtvbrowser) window.signalopenhbbtvbrowser('LOG:' + message); } catch (ignore) {}"
+                                    "  }"
                                     "  if (typeof window.__openhbbtvInjectKey === 'function') {"
-                                    "    try { window.__openhbbtvInjectKey(code, vkName); return; }"
-                                    "    catch (brokerError) { console.log('OpenHbbTV key broker failed', brokerError); }"
+                                    "    try {"
+                                    "      var brokerResult = window.__openhbbtvInjectKey(code, vkName);"
+                                    "      return 'broker:' + String(brokerResult);"
+                                    "    }"
+                                    "    catch (brokerError) {"
+                                    "      console.log('OpenHbbTV key broker failed', brokerError);"
+                                    "      sendLog('InjectedKey broker failed key=' + code + ' vk=' + vkName + ' error=' + String(brokerError));"
+                                    "    }"
                                     "  }"
                                     "  var resolved = parseInt(code, 10) || 0;"
                                     "  if (!resolved && typeof window[vkName] !== 'undefined') {"
@@ -772,13 +791,21 @@ void WebView::injectKeyEvent(int keyCode)
                                     "    try { Object.defineProperty(e, 'charCode', { value: 0 }); } catch (ignore) {}"
                                     "    return e;"
                                     "  }"
-                                    "  try { target.dispatchEvent(makeEvent('keydown')); } catch (e) { console.log('OpenHbbTV keydown failed', e); }"
+                                    "  var eventKey = keyName(resolved);"
+                                    "  var downResult = true;"
+                                    "  try { downResult = target.dispatchEvent(makeEvent('keydown')); }"
+                                    "  catch (e) { console.log('OpenHbbTV keydown failed', e); sendLog('InjectedKey fallback keydown failed target=' + describe(target) + ' error=' + String(e)); }"
                                     "  window.setTimeout(function() {"
-                                    "    try { target.dispatchEvent(makeEvent('keyup')); } catch (e) { console.log('OpenHbbTV keyup failed', e); }"
+                                    "    try { target.dispatchEvent(makeEvent('keyup')); }"
+                                    "    catch (e) { console.log('OpenHbbTV keyup failed', e); sendLog('InjectedKey fallback keyup failed target=' + describe(target) + ' error=' + String(e)); }"
                                     "  }, 25);"
+                                    "  sendLog('InjectedKey fallback target=' + describe(target) + ' active=' + describe(document.activeElement) + ' key=' + resolved + ' vk=' + (vkName || '') + ' eventKey=' + eventKey + ' accepted=' + (!!downResult));"
+                                    "  return 'fallback:' + resolved + ':' + describe(target);"
                                     "})();").arg(keyCode).arg(vkName);
     qDebug() << "[OpenHbbTV] inject keydown+keyup broker" << keyCode;
-    page()->runJavaScript(s);
+    page()->runJavaScript(s, [keyCode](const QVariant &result) {
+        qDebug() << "[OpenHbbTV] inject key JS result" << keyCode << result;
+    });
 }
 
 void WebView::dispatchHbbtvBridgeCommand(const QString &rawCommand)

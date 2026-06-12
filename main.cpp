@@ -57,7 +57,7 @@ int main(int argc, char *argv[])
     qputenv("QT_QPA_EGLFS_HIDECURSOR", QByteArrayLiteral("1"));
     installOpenHbbTVDebugLogger();
     qDebug() << "[OpenHbbTV] process start argc" << argc;
-    qDebug() << "[OpenHbbTV] process build id e2-rcu-owner-keybridge-v4-color-broadcast-deflood-debugswitch-20260612";
+    qDebug() << "[OpenHbbTV] process build id e2-rcu-owner-keybridge-v5-jsack-unackedok-fallback-20260612";
     qDebug() << "[OpenHbbTV] build mode e2-rcu-owner-stream-overlay-window";
 #if defined(EMBEDDED_BUILD)
     HardwareProfile::applyEnvironment(argc, argv);
