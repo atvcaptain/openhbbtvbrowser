@@ -465,7 +465,7 @@ void WebView::injectXmlHttpRequestScripts()
     if (quirks.open(QIODevice::ReadOnly)) {
         QString source = QString::fromUtf8(quirks.readAll());
         quirks.close();
-        const bool authHttpDebug = openHbbTVEnvEnabled("OPENHBBTV_AUTH_HTTP_DEBUG", true);
+        const bool authHttpDebug = openHbbTVEnvEnabled("OPENHBBTV_AUTH_HTTP_DEBUG", false);
         source.prepend(QStringLiteral("window.OPENHBBTV_AUTH_HTTP_DEBUG=%1;\n").arg(authHttpDebug ? QStringLiteral("true") : QStringLiteral("false")));
 
         QWebEngineScript script;

@@ -37,7 +37,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     text = String(text || "");
     text = text.replace(/(accounts\.ard\.de\/device\/token\/)([A-Z0-9]{5})\+[^"'\s<>)&]+/g, "$1$2+***");
     text = text.replace(/("token_uri"\s*:\s*"https:\/\/accounts\.ard\.de\/device\/token\/)([A-Z0-9]{5})\+[^"]+(")/g, "$1$2+***$3");
-    text = text.replace(/("(?:access_token|refresh_token|id_token|device_secret|token)"\s*:\s*")[^"]+(")/g, "$1***$2");
+    text = text.replace(/("(?:access_token|refresh_token|id_token|accessToken|refreshToken|idToken|device_secret|deviceSecret|token)"\s*:\s*")[^"]+(")/g, "$1***$2");
     return text.length > 600 ? text.slice(0, 600) + "..." : text;
   }
 

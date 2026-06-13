@@ -9,6 +9,7 @@
 #include <QRect>
 #include <QPointer>
 #include <QStringList>
+#include <QRegularExpression>
 #include <atomic>
 
 class QWebEnginePage;
@@ -24,6 +25,7 @@ public:
     void interceptRequest(QWebEngineUrlRequestInfo &info) override {
         const QUrl requestUrl = info.requestUrl();
         const QString url = requestUrl.toString(QUrl::FullyEncoded);
+        const QString logUrl = redactUrlForLog(url);
         const QWebEngineUrlRequestInfo::ResourceType type = info.resourceType();
         const bool nativeMediaRequest = type == QWebEngineUrlRequestInfo::ResourceTypeMedia ||
                                         type == QWebEngineUrlRequestInfo::ResourceTypeObject;
@@ -32,7 +34,7 @@ public:
             qWarning().noquote() << "[OpenHbbTV] blocked native Qt media/object request"
                                  << info.requestMethod()
                                  << type
-                                 << url;
+                                 << logUrl;
             info.block(true);
             return;
         }
@@ -41,7 +43,7 @@ public:
             qWarning().noquote() << "[OpenHbbTV] blocked external playback background request"
                                  << info.requestMethod()
                                  << type
-                                 << url;
+                                 << logUrl;
             info.block(true);
             return;
         }
@@ -50,7 +52,7 @@ public:
             qDebug().noquote() << "[NET] Request:"
                                << info.requestMethod()
                                << type
-                               << url;
+                               << logUrl;
         }
     }
 
@@ -58,6 +60,17 @@ public:
     static bool externalPlaybackActive();
 
 private:
+    static QString redactUrlForLog(const QString &url) {
+        QString redacted = url;
+        redacted.replace(QRegularExpression(QStringLiteral("(accounts\\.ard\\.de/device/token/[A-Za-z0-9_-]+)\\+[^\\s\"'<>)]*")),
+                         QStringLiteral("\\1+***"));
+        redacted.replace(QRegularExpression(QStringLiteral("([?&]userid=)[^&\\s\"'<>)]*")),
+                         QStringLiteral("\\1***"));
+        redacted.replace(QRegularExpression(QStringLiteral("(securetoken\\.googleapis\\.com/v1/token\\?key=)[^&\\s\"'<>)]*")),
+                         QStringLiteral("\\1***"));
+        return redacted;
+    }
+
     static bool shouldBlockExternalPlaybackRequest(const QUrl &requestUrl, QWebEngineUrlRequestInfo::ResourceType type);
     static std::atomic_bool s_externalPlaybackActive;
     bool m_logRequests;

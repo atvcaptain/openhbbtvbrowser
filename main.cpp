@@ -8,6 +8,9 @@
 #include <QCursor>
 #include <QCommandLineParser>
 #include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QFileInfoList>
 #include <QLockFile>
 #include <QUrl>
 #include <QWebEngineSettings>
@@ -52,12 +55,71 @@ QUrl commandLineUrlArgument()
     return QUrl();
 }
 
+bool directoryIsEmpty(const QString &path)
+{
+    QDir dir(path);
+    if (!dir.exists())
+        return true;
+    return dir.entryList(QDir::NoDotAndDotDot | QDir::AllEntries | QDir::Hidden | QDir::System).isEmpty();
+}
+
+bool copyPathRecursively(const QString &sourcePath, const QString &targetPath)
+{
+    QDir sourceDir(sourcePath);
+    if (!sourceDir.exists())
+        return false;
+
+    QDir targetDir(targetPath);
+    if (!targetDir.exists() && !QDir().mkpath(targetPath))
+        return false;
+
+    const QFileInfoList entries = sourceDir.entryInfoList(QDir::NoDotAndDotDot | QDir::AllEntries | QDir::Hidden | QDir::System);
+    for (const QFileInfo &entry : entries) {
+        const QString sourceEntry = entry.absoluteFilePath();
+        const QString targetEntry = targetDir.absoluteFilePath(entry.fileName());
+        if (entry.isDir()) {
+            if (!copyPathRecursively(sourceEntry, targetEntry))
+                return false;
+        } else {
+            if (QFile::exists(targetEntry))
+                continue;
+            if (!QFile::copy(sourceEntry, targetEntry))
+                return false;
+        }
+    }
+    return true;
+}
+
+QString profileStoragePath()
+{
+    const QString overridePath = QString::fromLocal8Bit(qgetenv("OPENHBBTV_PROFILE_STORAGE_PATH")).trimmed();
+    if (!overridePath.isEmpty())
+        return overridePath;
+#if defined(EMBEDDED_BUILD)
+    return QStringLiteral("/etc/enigma2/openhbbtvbrowser/profile");
+#else
+    return QString();
+#endif
+}
+
+QString profileCachePath()
+{
+    const QString overridePath = QString::fromLocal8Bit(qgetenv("OPENHBBTV_PROFILE_CACHE_PATH")).trimmed();
+    if (!overridePath.isEmpty())
+        return overridePath;
+#if defined(EMBEDDED_BUILD)
+    return QStringLiteral("/tmp/openhbbtvbrowser-cache");
+#else
+    return QString();
+#endif
+}
+
 int main(int argc, char *argv[])
 {
     qputenv("QT_QPA_EGLFS_HIDECURSOR", QByteArrayLiteral("1"));
     installOpenHbbTVDebugLogger();
     qDebug() << "[OpenHbbTV] process start argc" << argc;
-    qDebug() << "[OpenHbbTV] process build id e2-rcu-owner-keybridge-v35-fix-xhr-quirk-asi-20260613";
+    qDebug() << "[OpenHbbTV] process build id e2-rcu-owner-keybridge-v36-auth-log-redaction-20260613";
     qDebug() << "[OpenHbbTV] build mode e2-rcu-owner-stream-overlay-window";
 #if defined(EMBEDDED_BUILD)
     HardwareProfile::applyEnvironment(argc, argv);
@@ -112,12 +174,39 @@ int main(int argc, char *argv[])
              << "plugins" << false
              << "chromiumFlags" << QString::fromLocal8Bit(qgetenv("QTWEBENGINE_CHROMIUM_FLAGS"));
 
-    const QString defaultUserAgent = QWebEngineProfile::defaultProfile()->httpUserAgent();
+    QWebEngineProfile *defaultProfile = QWebEngineProfile::defaultProfile();
+    const QString oldPersistentStoragePath = defaultProfile->persistentStoragePath();
+    const QString persistentStoragePath = profileStoragePath();
+    const QString cachePath = profileCachePath();
+    if (!persistentStoragePath.isEmpty()) {
+        if (!oldPersistentStoragePath.isEmpty()
+            && oldPersistentStoragePath != persistentStoragePath
+            && QDir(oldPersistentStoragePath).exists()
+            && directoryIsEmpty(persistentStoragePath)) {
+            const bool migrated = copyPathRecursively(oldPersistentStoragePath, persistentStoragePath);
+            qDebug() << "[OpenHbbTV] web profile storage migration"
+                     << oldPersistentStoragePath
+                     << "->" << persistentStoragePath
+                     << "ok" << migrated;
+        }
+        QDir().mkpath(persistentStoragePath);
+        defaultProfile->setPersistentStoragePath(persistentStoragePath);
+    }
+    if (!cachePath.isEmpty()) {
+        QDir().mkpath(cachePath);
+        defaultProfile->setCachePath(cachePath);
+    }
+    defaultProfile->setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies);
+    qDebug() << "[OpenHbbTV] web profile storage"
+             << "persistent" << defaultProfile->persistentStoragePath()
+             << "cache" << defaultProfile->cachePath()
+             << "oldPersistent" << oldPersistentStoragePath;
+    const QString defaultUserAgent = defaultProfile->httpUserAgent();
     const QByteArray userAgentOverride = qgetenv("OPENHBBTV_USER_AGENT");
     const QString hbbtvUserAgent = userAgentOverride.isEmpty()
             ? defaultUserAgent + QStringLiteral(" HbbTV/1.4.1 (; OpenATV; OpenHbbTV; 8.0; ; openhbbtv; )")
             : QString::fromLocal8Bit(userAgentOverride);
-    QWebEngineProfile::defaultProfile()->setHttpUserAgent(hbbtvUserAgent);
+    defaultProfile->setHttpUserAgent(hbbtvUserAgent);
     qDebug() << "[OpenHbbTV] default user agent" << defaultUserAgent;
     qDebug() << "[OpenHbbTV] active user agent" << hbbtvUserAgent;
 
