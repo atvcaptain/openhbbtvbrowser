@@ -15,7 +15,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
 
   // return unchanged URL
   return uri;
-}
+};
 
 (function() {
   if (window.__openhbbtvAuthHttpDebugInstalled)
