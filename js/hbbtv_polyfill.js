@@ -29966,6 +29966,15 @@ class OipfAVControlMapper {
         window.HBBTV_POLYFILL_NS.avControlCounter = window.HBBTV_POLYFILL_NS.avControlCounter || 0;
         this.avControlId = ++window.HBBTV_POLYFILL_NS.avControlCounter;
         this.avControlObject.__openhbbtvAvControlId = this.avControlId;
+        try {
+            var timeline = window.HBBTV_POLYFILL_NS.getBroadcastTimelinePosition && window.HBBTV_POLYFILL_NS.getBroadcastTimelinePosition();
+            if (timeline && timeline.durationMs > 0) {
+                this.avControlObject.playPosition = timeline.positionMs;
+                this.avControlObject.playTime = timeline.durationMs;
+                window.signalopenhbbtvbrowser && window.signalopenhbbtvbrowser("LOG:AVControl#" + this.avControlId + " broadcast timeline init pos=" + timeline.positionMs + " duration=" + timeline.durationMs + " start=" + timeline.startTime + " name=" + timeline.name);
+            }
+        } catch (ignoreTimeline) {
+        }
         if (window.HBBTV_POLYFILL_NS.avControlObjects.indexOf(this.avControlObject) < 0) {
             window.HBBTV_POLYFILL_NS.avControlObjects.push(this.avControlObject);
         }
@@ -30086,7 +30095,7 @@ class OipfAVControlMapper {
         };
 
         const trace = (message) => {
-            send("LOG:AVControl#" + this.avControlId + " " + message + " state=" + this.avControlObject.playState + " speed=" + this.avControlObject.speed + " active=" + describeElement(document.activeElement) + " lastKey=" + lastKeySummary());
+            send("LOG:AVControl#" + this.avControlId + " " + message + " state=" + this.avControlObject.playState + " speed=" + this.avControlObject.speed + " pos=" + this.avControlObject.playPosition + " time=" + this.avControlObject.playTime + " active=" + describeElement(document.activeElement) + " lastKey=" + lastKeySummary());
         };
 
         const blockNativeAvSurface = (reason) => {
@@ -31040,6 +31049,52 @@ function init() {
         'dsd': ''
     };
     window.HBBTV_POLYFILL_NS.preferredLanguage = window.HBBTV_POLYFILL_NS.preferredLanguage || 'DEU';
+    window.HBBTV_POLYFILL_NS.getBroadcastTimelinePosition = function () {
+        var ns = window.HBBTV_POLYFILL_NS || {};
+        var info = ns.broadcastInfo || {};
+        var programmes = ns.broadcastProgrammes || info.programmes || [];
+        var nowSeconds = Number(info.timestamp || 0);
+        if (nowSeconds > 0 && ns.broadcastInfoReceivedAt && Date.now) {
+            nowSeconds += Math.max(0, Date.now() - Number(ns.broadcastInfoReceivedAt || 0)) / 1000;
+        }
+        if (!(nowSeconds > 0) && Date.now) {
+            nowSeconds = Date.now() / 1000;
+        }
+        var selected = null;
+        programmes.forEach(function (programme) {
+            var start = Number(programme && programme.startTime || 0);
+            var duration = Number(programme && programme.duration || 0);
+            if (!(start > 0) || !(duration > 0)) {
+                return;
+            }
+            if (!selected && nowSeconds >= start && nowSeconds < start + duration) {
+                selected = programme;
+            }
+        });
+        if (!selected) {
+            programmes.forEach(function (programme) {
+                var start = Number(programme && programme.startTime || 0);
+                var duration = Number(programme && programme.duration || 0);
+                if (start > 0 && duration > 0 && nowSeconds >= start) {
+                    selected = programme;
+                }
+            });
+        }
+        if (!selected) {
+            return null;
+        }
+        var positionMs = Math.max(0, Math.floor((nowSeconds - Number(selected.startTime || 0)) * 1000));
+        var durationMs = Math.max(0, Math.floor(Number(selected.duration || 0) * 1000));
+        if (durationMs > 0) {
+            positionMs = Math.min(positionMs, durationMs);
+        }
+        return {
+            positionMs: positionMs,
+            durationMs: durationMs,
+            startTime: Number(selected.startTime || 0),
+            name: selected.name || ''
+        };
+    };
 
     // set body position
     document.body.style.position = "absolute";
