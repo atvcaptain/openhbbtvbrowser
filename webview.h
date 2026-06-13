@@ -8,6 +8,7 @@
 #include <QTimer>
 #include <QRect>
 #include <QPointer>
+#include <QStringList>
 #include <atomic>
 
 class QWebEnginePage;
@@ -80,6 +81,8 @@ public:
     void setLanguage(const QString &language);
     void setScriptDebugging(const QString &scriptDebugging);
     void attachPageDiagnostics();
+    void recordBackendCommand(int command, const QString &data);
+    void recordBrowserCommand(int command, const QString &data);
 
 Q_SIGNALS:
     void hbbtvCommand(int command, const QString &data);
@@ -103,6 +106,9 @@ private:
     void loadInitialUrlAfterTeletextReturn(int delayMs);
     void refreshApplicationAfterTeletextReturn();
     void runJavaScriptWithWatchdog(const QString &label, const QString &script, int timeoutMs = 1200, bool recoverOnTimeout = false);
+    void recordDiagnosticEvent(const QString &event);
+    void dumpRenderCrashDiagnostics(int status, int exitCode);
+    QString diagnosticSnippet(const QString &text, int maxLength = 220) const;
     bool shouldForceNativeVisibleRefresh(const QString &reason) const;
     void forceNativeVisibleRefresh(QWidget *top, const QString &reason);
     void repaintOverlaySurface(const QString &reason);
@@ -135,6 +141,16 @@ private:
     bool m_streamOverlayGeometryValid;
     bool m_jsTimeoutRecoveryPending;
     QPointer<QWebEnginePage> m_diagnosticsPage;
+    QStringList m_recentDiagnosticEvents;
+    int m_diagnosticSeq;
+    int m_jsSeq;
+    QString m_lastJsStarted;
+    QString m_lastJsCompleted;
+    QString m_lastBridgeCommand;
+    QString m_lastBackendCommand;
+    QString m_lastBrowserCommand;
+    QString m_lastLoadUrl;
+    QString m_lastTitle;
     bool m_teletextReturnInProgress;
     QString m_teletextDigitBuffer;
     QTimer *m_teletextDigitTimer;

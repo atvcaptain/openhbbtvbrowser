@@ -121,6 +121,8 @@ WebView::WebView(QWidget *parent)
     , m_streamOverlayHoldUntilMs(0)
     , m_streamOverlayGeometryValid(false)
     , m_jsTimeoutRecoveryPending(false)
+    , m_diagnosticSeq(0)
+    , m_jsSeq(0)
     , m_teletextReturnInProgress(false)
     , m_teletextDigitTimer(new QTimer(this))
     , m_quitMsg(new QLabel)
@@ -149,9 +151,19 @@ WebView::WebView(QWidget *parent)
     connect(m_teletextDigitTimer, &QTimer::timeout, this, &WebView::flushTeletextDigitBuffer);
 
     connect(this, &QWebEngineView::titleChanged, this, &WebView::titleChanged);
-    connect(this, &QWebEngineView::loadStarted, this, [this]() { qDebug() << "[OpenHbbTV] loadStarted" << url().toString(); });
-    connect(this, &QWebEngineView::loadProgress, this, [this](int progress) { qDebug() << "[OpenHbbTV] loadProgress" << progress << url().toString(); });
+    connect(this, &QWebEngineView::loadStarted, this, [this]() {
+        const QString currentUrl = url().toString();
+        recordDiagnosticEvent(QStringLiteral("loadStarted url=") + diagnosticSnippet(currentUrl));
+        qDebug() << "[OpenHbbTV] loadStarted" << currentUrl;
+    });
+    connect(this, &QWebEngineView::loadProgress, this, [this](int progress) {
+        const QString currentUrl = url().toString();
+        recordDiagnosticEvent(QStringLiteral("loadProgress %1 url=%2").arg(progress).arg(diagnosticSnippet(currentUrl)));
+        qDebug() << "[OpenHbbTV] loadProgress" << progress << currentUrl;
+    });
     connect(this, &QWebEngineView::urlChanged, this, [this](const QUrl &u) {
+        m_lastLoadUrl = u.toString();
+        recordDiagnosticEvent(QStringLiteral("urlChanged ") + diagnosticSnippet(m_lastLoadUrl));
         qDebug() << "[OpenHbbTV] urlChanged" << u.toString();
         if (m_teletextReturnInProgress && isTeletextUrl(u)) {
             qDebug() << "[OpenHbbTV] block teletext reload during leading-zero return" << u.toString();
@@ -174,8 +186,10 @@ void WebView::attachPageDiagnostics()
     m_diagnosticsPage = currentPage;
     connect(currentPage, &QWebEnginePage::renderProcessTerminated, this,
             [this](QWebEnginePage::RenderProcessTerminationStatus status, int exitCode) {
+                recordDiagnosticEvent(QStringLiteral("renderProcessTerminated status=%1 exit=%2").arg(status).arg(exitCode));
                 qWarning() << "[OpenHbbTV] renderProcessTerminated" << status << exitCode
                            << "stream" << m_streamState << url().toString();
+                dumpRenderCrashDiagnostics(static_cast<int>(status), exitCode);
                 requestRestartApplicationOnce(QStringLiteral("render-process-terminated"));
             });
     qDebug() << "[OpenHbbTV] page diagnostics attached" << currentPage;
@@ -223,6 +237,10 @@ void WebView::setStreamRendererActive(bool active, const QString &reason)
 {
     if (!streamRendererFreezeEnabled())
         return;
+
+    recordDiagnosticEvent(QStringLiteral("setStreamRendererActive active=%1 reason=%2")
+        .arg(active)
+        .arg(diagnosticSnippet(reason)));
 
     QWebEnginePage *currentPage = page();
     if (!currentPage)
@@ -283,6 +301,7 @@ void WebView::setStreamRendererActive(bool active, const QString &reason)
 
 void WebView::requestRestartApplicationOnce(const QString &reason)
 {
+    recordDiagnosticEvent(QStringLiteral("restart requested ") + diagnosticSnippet(reason));
     if (m_jsTimeoutRecoveryPending) {
         qWarning() << "[OpenHbbTV] restart application already pending" << reason
                    << "stream" << m_streamState << "url" << url().toString();
@@ -295,17 +314,99 @@ void WebView::requestRestartApplicationOnce(const QString &reason)
     emit hbbtvCommand(CommandClient::CommandRestartApplication, reason);
 }
 
+QString WebView::diagnosticSnippet(const QString &text, int maxLength) const
+{
+    QString value = text;
+    value.replace(QLatin1Char('\r'), QLatin1Char(' '));
+    value.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    value.replace(QLatin1Char('\t'), QLatin1Char(' '));
+    while (value.contains(QStringLiteral("  ")))
+        value.replace(QStringLiteral("  "), QStringLiteral(" "));
+    if (value.length() > maxLength)
+        value = value.left(maxLength) + QStringLiteral("...");
+    return value;
+}
+
+void WebView::recordDiagnosticEvent(const QString &event)
+{
+    const QString entry = QStringLiteral("%1 #%2 %3")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz")))
+        .arg(++m_diagnosticSeq)
+        .arg(event);
+    m_recentDiagnosticEvents.append(entry);
+    while (m_recentDiagnosticEvents.size() > 30)
+        m_recentDiagnosticEvents.removeFirst();
+}
+
+void WebView::recordBackendCommand(int command, const QString &data)
+{
+    m_lastBackendCommand = QStringLiteral("%1 %2")
+        .arg(command)
+        .arg(diagnosticSnippet(data));
+    recordDiagnosticEvent(QStringLiteral("backend-command ") + m_lastBackendCommand);
+}
+
+void WebView::recordBrowserCommand(int command, const QString &data)
+{
+    m_lastBrowserCommand = QStringLiteral("%1 %2")
+        .arg(command)
+        .arg(diagnosticSnippet(data));
+    recordDiagnosticEvent(QStringLiteral("browser-command ") + m_lastBrowserCommand);
+}
+
+void WebView::dumpRenderCrashDiagnostics(int status, int exitCode)
+{
+    QWidget *top = window();
+    qWarning() << "[OpenHbbTV] render crash diagnostics begin"
+               << "status" << status
+               << "exit" << exitCode
+               << "url" << url().toString()
+               << "lastLoadUrl" << m_lastLoadUrl
+               << "title" << m_lastTitle
+               << "streamState" << m_streamState
+               << "streamError" << m_streamError
+               << "overlayVisible" << m_streamOverlayVisible
+               << "overlayLowered" << m_streamOverlayLowered
+               << "rendererFrozen" << m_streamRendererFrozen
+               << "viewHiddenForPlayback" << m_streamViewHiddenForPlayback
+               << "viewVisible" << isVisible()
+               << "windowVisible" << (top ? top->isVisible() : false)
+               << "viewGeometry" << geometry()
+               << "windowGeometry" << (top ? top->geometry() : QRect())
+               << "externalPlaybackGuard" << OpenHbbTVRequestInterceptor::externalPlaybackActive();
+    qWarning() << "[OpenHbbTV] render crash last activity"
+               << "jsStarted" << m_lastJsStarted
+               << "jsCompleted" << m_lastJsCompleted
+               << "bridge" << m_lastBridgeCommand
+               << "backend" << m_lastBackendCommand
+               << "browser" << m_lastBrowserCommand
+               << "teletext" << isTeletextUrl();
+    for (const QString &entry : m_recentDiagnosticEvents)
+        qWarning() << "[OpenHbbTV] render crash recent" << entry;
+    qWarning() << "[OpenHbbTV] render crash diagnostics end";
+}
+
 void WebView::runJavaScriptWithWatchdog(const QString &label, const QString &script, int timeoutMs, bool recoverOnTimeout)
 {
     QSharedPointer<bool> completed(new bool(false));
-    page()->runJavaScript(script, [completed, label](const QVariant &result) {
+    const QString diagnosticLabel = QStringLiteral("#%1 %2").arg(++m_jsSeq).arg(label);
+    m_lastJsStarted = diagnosticLabel;
+    recordDiagnosticEvent(QStringLiteral("js-start ") + diagnosticSnippet(diagnosticLabel));
+    QPointer<WebView> self(this);
+    page()->runJavaScript(script, [completed, label, diagnosticLabel, self](const QVariant &result) {
         *completed = true;
+        if (self) {
+            self->m_lastJsCompleted = diagnosticLabel;
+            self->recordDiagnosticEvent(QStringLiteral("js-result ") + self->diagnosticSnippet(diagnosticLabel)
+                + QStringLiteral(" result=") + self->diagnosticSnippet(result.toString()));
+        }
         qDebug() << "[OpenHbbTV] JS result" << label << result;
     });
 
     QTimer::singleShot(timeoutMs, this, [this, completed, label, recoverOnTimeout]() {
         if (*completed)
             return;
+        recordDiagnosticEvent(QStringLiteral("js-timeout ") + diagnosticSnippet(label));
         qWarning() << "[OpenHbbTV] JS timeout" << label << "stream" << m_streamState << "url" << url().toString();
         if (recoverOnTimeout)
             requestRestartApplicationOnce(QStringLiteral("js-timeout ") + label);
@@ -382,6 +483,7 @@ void WebView::injectXmlHttpRequestScripts()
 void WebView::setCurrentChannel(const int &onid, const int &tsid, const int &sid)
 {
     QWebEngineScript script;
+    recordDiagnosticEvent(QStringLiteral("setCurrentChannel %1,%2,%3").arg(onid).arg(tsid).arg(sid));
 
     QString s = QString::fromLatin1("(function() {"
                                     "  window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};"
@@ -406,7 +508,15 @@ void WebView::setCurrentChannel(const int &onid, const int &tsid, const int &sid
 void WebView::setBroadcastInfo(const QString &json)
 {
     qDebug() << "[OpenHbbTV] setBroadcastInfo" << json.left(240);
+    recordDiagnosticEvent(QStringLiteral("setBroadcastInfo len=%1 teletext=%2")
+        .arg(json.length())
+        .arg(isTeletextUrl()));
     m_lastBroadcastInfo = json;
+    if (isTeletextUrl() && !openHbbTVEnvEnabled("OPENHBBTV_TELETEXT_BROADCAST_INFO", true)) {
+        recordDiagnosticEvent(QStringLiteral("skip setBroadcastInfo JS on teletext page"));
+        qDebug() << "[OpenHbbTV] skip setBroadcastInfo JS on teletext page" << url().toString();
+        return;
+    }
     const QByteArray encoded = json.toUtf8().toBase64();
     QString s = QString::fromLatin1(
         "(function() {"
@@ -539,6 +649,7 @@ void WebView::retryStreamOverlayVisible(const QString &reason, int delayMs)
 
 void WebView::showApplicationOverlay(const QString &reason)
 {
+    recordDiagnosticEvent(QStringLiteral("showApplicationOverlay ") + diagnosticSnippet(reason));
     setStreamRendererActive(true, QStringLiteral("show overlay ") + reason);
 
     const QString reasonLower = reason.toLower();
@@ -667,6 +778,7 @@ void WebView::syncDeferredStreamStateToApplication(const QString &reason)
 
 void WebView::hideApplicationOverlay(const QString &reason)
 {
+    recordDiagnosticEvent(QStringLiteral("hideApplicationOverlay ") + diagnosticSnippet(reason));
     const QString reasonLower = reason.toLower();
     const bool preStreamHide = reasonLower.contains(QStringLiteral("playstreamrequest"))
         || reasonLower.contains(QStringLiteral("hard restart stream"))
@@ -792,6 +904,10 @@ void WebView::refreshApplicationAfterTeletextReturn()
 
 void WebView::setStreamState(int state, int error)
 {
+    recordDiagnosticEvent(QStringLiteral("setStreamState %1,%2 overlay=%3")
+        .arg(state)
+        .arg(error)
+        .arg(m_streamOverlayVisible));
     const bool wasOverlayVisible = m_streamOverlayVisible;
     m_streamState = state;
     m_streamError = error;
@@ -949,6 +1065,7 @@ void WebView::setScriptDebugging(const QString &scriptDebugging)
 void WebView::setInitialUrl(const QUrl &url)
 {
     m_initialUrl = url;
+    recordDiagnosticEvent(QStringLiteral("setInitialUrl ") + diagnosticSnippet(m_initialUrl.toString()));
     qDebug() << "[OpenHbbTV] initial url stored" << m_initialUrl.toString();
 }
 
@@ -1003,6 +1120,7 @@ void WebView::beginTeletextReturn()
     }
 
     qDebug() << "[OpenHbbTV] teletext leading zero request fresh red-button restart" << m_initialUrl.toString();
+    recordDiagnosticEvent(QStringLiteral("teletext leading-zero restart ") + diagnosticSnippet(m_initialUrl.toString()));
     m_teletextReturnInProgress = true;
     m_teletextDigitBuffer.clear();
     m_teletextDigitTimer->stop();
@@ -1072,6 +1190,7 @@ bool WebView::handleTeletextDigit(int keyCode)
     m_teletextDigitBuffer.clear();
 
     qDebug() << "[OpenHbbTV] teletext page input" << page;
+    recordDiagnosticEvent(QStringLiteral("teletext page input ") + page);
     for (const QChar ch : page)
         injectKeyEvent(VirtualKey::VK_0 + ch.digitValue());
     return true;
@@ -1095,6 +1214,7 @@ void WebView::flushTeletextDigitBuffer()
 void WebView::sendKeyEvent(const int &keyCode)
 {
     qDebug() << "[OpenHbbTV] sendKeyEvent" << keyCode;
+    recordDiagnosticEvent(QStringLiteral("sendKeyEvent %1").arg(keyCode));
 
     if (handleTeletextDigit(keyCode))
         return;
@@ -1220,13 +1340,23 @@ void WebView::injectKeyEvent(int keyCode)
                                     "})();").arg(keyCode).arg(vkName);
     qDebug() << "[OpenHbbTV] inject keydown+keyup broker" << keyCode;
     QSharedPointer<bool> completed(new bool(false));
-    page()->runJavaScript(s, [completed, keyCode](const QVariant &result) {
+    const QString diagnosticLabel = QStringLiteral("#%1 injectKey %2").arg(++m_jsSeq).arg(keyCode);
+    m_lastJsStarted = diagnosticLabel;
+    recordDiagnosticEvent(QStringLiteral("js-start ") + diagnosticSnippet(diagnosticLabel));
+    QPointer<WebView> self(this);
+    page()->runJavaScript(s, [completed, keyCode, diagnosticLabel, self](const QVariant &result) {
         *completed = true;
+        if (self) {
+            self->m_lastJsCompleted = diagnosticLabel;
+            self->recordDiagnosticEvent(QStringLiteral("js-result ") + self->diagnosticSnippet(diagnosticLabel)
+                + QStringLiteral(" result=") + self->diagnosticSnippet(result.toString()));
+        }
         qDebug() << "[OpenHbbTV] inject key JS result" << keyCode << result;
     });
-    QTimer::singleShot(1500, this, [this, completed, keyCode]() {
+    QTimer::singleShot(1500, this, [this, completed, keyCode, diagnosticLabel]() {
         if (*completed)
             return;
+        recordDiagnosticEvent(QStringLiteral("js-timeout ") + diagnosticSnippet(diagnosticLabel));
         qWarning() << "[OpenHbbTV] inject key JS timeout" << keyCode
                    << "stream" << m_streamState << "url" << url().toString();
         requestRestartApplicationOnce(QStringLiteral("inject-key-js-timeout %1").arg(keyCode));
@@ -1242,6 +1372,8 @@ void WebView::dispatchHbbtvBridgeCommand(const QString &rawCommand)
         command.truncate(seqPos);
 
     qDebug() << "[OpenHbbTV] normalized bridge command" << command;
+    m_lastBridgeCommand = diagnosticSnippet(command);
+    recordDiagnosticEvent(QStringLiteral("bridge-command ") + m_lastBridgeCommand);
 
     if (command == QStringLiteral("BROADCAST_PLAY")) {
         OpenHbbTVRequestInterceptor::setExternalPlaybackActive(false);
@@ -1291,6 +1423,8 @@ void WebView::dispatchHbbtvBridgeCommand(const QString &rawCommand)
 void WebView::titleChanged(const QString &title)
 {
     qDebug() << "[OpenHbbTV] titleChanged" << title;
+    m_lastTitle = diagnosticSnippet(title);
+    recordDiagnosticEvent(QStringLiteral("titleChanged ") + m_lastTitle);
     if (title.startsWith(QStringLiteral("OPENATV_HBBTV:"))) {
         dispatchHbbtvBridgeCommand(title.mid(14));
     } else if (title.startsWith(QStringLiteral("OipfVideoBroadcastEmbeddedObject"))) {
@@ -1305,6 +1439,10 @@ void WebView::titleChanged(const QString &title)
 void WebView::loadFinished(bool ok)
 {
     qDebug() << "[OpenHbbTV] loadFinished" << ok << url().toString();
+    m_lastLoadUrl = url().toString();
+    recordDiagnosticEvent(QStringLiteral("loadFinished ok=%1 url=%2")
+        .arg(ok)
+        .arg(diagnosticSnippet(m_lastLoadUrl)));
     if (ok)
         m_jsTimeoutRecoveryPending = false;
     if (m_teletextReturnInProgress && ok && isInitialUrl(url())) {
