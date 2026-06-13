@@ -165,6 +165,7 @@ private:
     QString m_lastLoadUrl;
     QString m_lastTitle;
     bool m_teletextReturnInProgress;
+    QUrl m_teletextReturnUrl;
     QString m_teletextDigitBuffer;
     QTimer *m_teletextDigitTimer;
     QLabel *m_quitMsg;

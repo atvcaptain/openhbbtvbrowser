@@ -1122,22 +1122,53 @@ void WebView::beginTeletextReturn()
         return;
     }
 
-    qDebug() << "[OpenHbbTV] teletext leading zero request fresh red-button restart" << m_initialUrl.toString();
-    recordDiagnosticEvent(QStringLiteral("teletext leading-zero restart ") + diagnosticSnippet(m_initialUrl.toString()));
     m_teletextReturnInProgress = true;
+    m_teletextReturnUrl = QUrl();
     m_teletextDigitBuffer.clear();
     m_teletextDigitTimer->stop();
 
-    // Do not forward the leading zero to the teletext application. A local URL
-    // reload leaves stale ARD/VTX JavaScript state behind, so ask the Enigma2
-    // backend to stop the current browser process and start a fresh Red Button
-    // application instance through the normal eHbbTV activation path.
-    emit hbbtvCommand(CommandClient::CommandRestartApplication, QStringLiteral("redbutton"));
+    QWebEngineHistory *history = page() ? page()->history() : Q_NULLPTR;
+    const QUrl backUrl = history && history->canGoBack() ? history->backItem().url() : QUrl();
+    const bool forceRestart = openHbbTVEnvEnabled("OPENHBBTV_TELETEXT_RESTART_ON_ZERO", false);
+    if (!forceRestart && backUrl.isValid() && !isTeletextUrl(backUrl)) {
+        m_teletextReturnUrl = backUrl;
+        qDebug() << "[OpenHbbTV] teletext leading zero history back"
+                 << "from" << url().toString()
+                 << "to" << backUrl.toString();
+        recordDiagnosticEvent(QStringLiteral("teletext leading-zero history back ") + diagnosticSnippet(backUrl.toString()));
+        history->back();
+        QTimer::singleShot(900, this, [this]() {
+            if (m_teletextReturnInProgress && isTeletextUrl()) {
+                qDebug() << "[OpenHbbTV] teletext history back still on teletext; force target url"
+                         << m_teletextReturnUrl.toString();
+                if (m_teletextReturnUrl.isValid() && !m_teletextReturnUrl.isEmpty())
+                    setUrl(m_teletextReturnUrl);
+            }
+        });
+    } else if (!forceRestart && m_initialUrl.isValid() && !m_initialUrl.isEmpty()) {
+        m_teletextReturnUrl = m_initialUrl;
+        qDebug() << "[OpenHbbTV] teletext leading zero force initial url"
+                 << "from" << url().toString()
+                 << "to" << m_initialUrl.toString()
+                 << "backUrl" << backUrl.toString();
+        recordDiagnosticEvent(QStringLiteral("teletext leading-zero initial-url ") + diagnosticSnippet(m_initialUrl.toString()));
+        loadInitialUrlAfterTeletextReturn(0);
+    } else {
+        qDebug() << "[OpenHbbTV] teletext leading zero request fresh red-button restart"
+                 << m_initialUrl.toString()
+                 << "force" << forceRestart
+                 << "backUrl" << backUrl.toString();
+        recordDiagnosticEvent(QStringLiteral("teletext leading-zero restart ") + diagnosticSnippet(m_initialUrl.toString()));
+        emit hbbtvCommand(CommandClient::CommandRestartApplication, QStringLiteral("redbutton"));
+    }
 
     QTimer::singleShot(2500, this, [this]() {
         if (m_teletextReturnInProgress) {
-            qDebug() << "[OpenHbbTV] teletext fresh restart still pending" << url().toString();
+            qDebug() << "[OpenHbbTV] teletext return still pending"
+                     << "current" << url().toString()
+                     << "target" << m_teletextReturnUrl.toString();
             m_teletextReturnInProgress = false;
+            m_teletextReturnUrl = QUrl();
         }
     });
 }
@@ -1163,7 +1194,7 @@ bool WebView::handleTeletextDigit(int keyCode)
 
     // ARD HbbTV teletext pages are addressed from 100 to 899. A leading
     // zero is therefore not a page-number prefix; consume it immediately
-    // and reopen the broadcaster start application via Enigma2/eHbbTV.
+    // and return to the HbbTV page that opened teletext.
     // Zeros in the second or third position remain normal page input, e.g.
     // 100, 101, 110.
     if (m_teletextReturnInProgress) {
@@ -1448,11 +1479,19 @@ void WebView::loadFinished(bool ok)
         .arg(diagnosticSnippet(m_lastLoadUrl)));
     if (ok)
         m_jsTimeoutRecoveryPending = false;
-    if (m_teletextReturnInProgress && ok && isInitialUrl(url())) {
-        qDebug() << "[OpenHbbTV] teletext leading-zero return completed" << url().toString();
-        m_teletextReturnInProgress = false;
-        QTimer::singleShot(80, this, &WebView::refreshApplicationAfterTeletextReturn);
-        QTimer::singleShot(450, this, &WebView::refreshApplicationAfterTeletextReturn);
+    if (m_teletextReturnInProgress && ok) {
+        const QUrl currentUrl = url();
+        const bool targetReached = m_teletextReturnUrl.isValid() && !m_teletextReturnUrl.isEmpty() &&
+            currentUrl.adjusted(QUrl::RemoveFragment) == m_teletextReturnUrl.adjusted(QUrl::RemoveFragment);
+        if (targetReached || !isTeletextUrl(currentUrl)) {
+            qDebug() << "[OpenHbbTV] teletext leading-zero return completed"
+                     << currentUrl.toString()
+                     << "target" << m_teletextReturnUrl.toString();
+            m_teletextReturnInProgress = false;
+            m_teletextReturnUrl = QUrl();
+            QTimer::singleShot(80, this, &WebView::refreshApplicationAfterTeletextReturn);
+            QTimer::singleShot(450, this, &WebView::refreshApplicationAfterTeletextReturn);
+        }
     }
     if (ok) {
         if (size().width() == 1920 && size().height() == 1080)
