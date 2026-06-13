@@ -30665,6 +30665,39 @@ __webpack_require__.r(__webpack_exports__);
 const hbbtvFn = function () {
     window.oipf = window.oipf || {};
 
+    function makeCollection(items) {
+        var collection = items || [];
+        collection.item = function (index) {
+            return index >= 0 && index < collection.length ? collection[index] : null;
+        };
+        return collection;
+    }
+
+    function makeEventTarget() {
+        var listeners = {};
+        return {
+            addEventListener: function (eventName, listener) {
+                if (typeof listener !== 'function') {
+                    return;
+                }
+                listeners[eventName] = listeners[eventName] || [];
+                listeners[eventName].push(listener);
+            },
+            removeEventListener: function (eventName, listener) {
+                var list = listeners[eventName] || [];
+                listeners[eventName] = list.filter(function (item) { return item !== listener; });
+            },
+            dispatchEvent: function (event) {
+                var eventName = event && event.type;
+                var list = listeners[eventName] || [];
+                list.slice().forEach(function (listener) {
+                    try { listener.call(this, event); } catch (ignore) {}
+                }, this);
+                return true;
+            }
+        };
+    }
+
     // 7.1 Object factory API ------------------------------------------------------
 
     window.oipfObjectFactory = window.oipfObjectFactory || {};
@@ -30674,6 +30707,7 @@ const hbbtvFn = function () {
         var type = String(mimeType || '').toLowerCase();
         return type === 'video/broadcast' ||
             type === 'video/mpeg' ||
+            type === 'application/oipfobjectfactory' ||
             type === 'application/oipfapplicationmanager' ||
             type === 'application/oipfcapabilities' ||
             type === 'application/oipfconfiguration' ||
@@ -30811,6 +30845,14 @@ const hbbtvFn = function () {
         return false;
     };
 
+    Application.prototype.activate = function () {
+        return true;
+    };
+
+    Application.prototype.deactivate = function () {
+        return true;
+    };
+
     Application.prototype.createApplication = function (uri, createChild) {
         window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: createApplication: ' + uri);
 
@@ -30911,12 +30953,89 @@ const hbbtvFn = function () {
 
     // 7.9.1 The application/oipfParentalControlManager embedded object ------------
 
+    window.oipfParentalControlManager = window.oipfParentalControlManager || {};
+    window.oipfParentalControlManager.parentalRatingSchemes = makeCollection([
+        { name: 'dvb-si', scheme: 'dvb-si' }
+    ]);
+    window.oipfParentalControlManager.parentalControlServices = makeCollection([]);
+    window.oipfParentalControlManager.parentalPINLength = 0;
+    window.oipfParentalControlManager.isRatingBlocked = function () {
+        return false;
+    };
+    window.oipfParentalControlManager.getParentalRatingSettings = function () {
+        return makeCollection([]);
+    };
+    window.oipfParentalControlManager.verifyParentalControlPIN = function () {
+        return true;
+    };
+    window.oipfParentalControlManager.requestParentalControlApproval = function () {
+        return Promise.resolve(true);
+    };
 
     // 7.10.1 The application/oipfRecordingScheduler embedded object (+PVR) --------
 
 
     // 7.12.1 The application/oipfSearchManager embedded object --------------------
 
+    window.oipfSearchManager = window.oipfSearchManager || {};
+    function makeProgramme(programme) {
+        programme = programme || {};
+        return {
+            name: programme.name || '',
+            channelId: programme.channelId || (window.HBBTV_POLYFILL_NS.currentChannel && window.HBBTV_POLYFILL_NS.currentChannel.ccid) || '',
+            startTime: Number(programme.startTime || 0),
+            duration: Number(programme.duration || 0),
+            description: programme.description || '',
+            longDescription: programme.longDescription || programme.description || ''
+        };
+    }
+    function makeProgrammeResults() {
+        var programmes = window.HBBTV_POLYFILL_NS.broadcastProgrammes || [];
+        return makeCollection(programmes.map(makeProgramme).filter(function (programme) {
+            return programme.name || programme.startTime > 0 || programme.duration > 0;
+        }));
+    }
+    function MetadataSearch(searchTarget) {
+        var eventTarget = makeEventTarget();
+        this.searchTarget = searchTarget;
+        this.result = makeProgrammeResults();
+        this.state = 0;
+        this.addEventListener = eventTarget.addEventListener;
+        this.removeEventListener = eventTarget.removeEventListener;
+        this.dispatchEvent = eventTarget.dispatchEvent;
+    }
+    MetadataSearch.prototype.setQuery = function () {
+        return true;
+    };
+    MetadataSearch.prototype.getResults = function () {
+        this.result = makeProgrammeResults();
+        return this.result;
+    };
+    MetadataSearch.prototype.findProgrammesFromStream = function () {
+        this.result = makeProgrammeResults();
+        this.state = 3;
+        var event = document.createEvent('Event');
+        event.initEvent('MetadataSearch', false, false);
+        event.state = this.state;
+        event.result = this.result;
+        this.dispatchEvent(event);
+        if (typeof this.onMetadataSearch === 'function') {
+            this.onMetadataSearch(event);
+        }
+        return true;
+    };
+    MetadataSearch.prototype.abort = function () {
+        this.state = 0;
+        return true;
+    };
+    window.oipfSearchManager.createSearch = function (searchTarget) {
+        return new MetadataSearch(searchTarget);
+    };
+    window.oipfSearchManager.createQuery = function (field, comparison, value) {
+        return { field: field || '', comparison: comparison || 0, value: value };
+    };
+    window.oipfSearchManager.guideDaysAvailable = 0;
+    window.oipfSearchManager.onMetadataUpdate = null;
 
     // 7.13.1 The video/broadcast embedded object ----------------------------------
 
@@ -30952,7 +31071,10 @@ const hbbtvFn = function () {
         var rawType = oipfPluginObject.getAttribute("type") || "";
         var sType = String(rawType).toLowerCase();
         var sId = oipfPluginObject.getAttribute("id") || "";
-        if (sType === "application/oipfapplicationmanager") {
+        if (sType === "application/oipfobjectfactory") {
+            mixin(window.oipfObjectFactory, oipfPluginObject);
+            window.signalopenhbbtvbrowser && window.signalopenhbbtvbrowser("LOG:OIPF object bound type=" + rawType + " id=" + sId + " object=objectFactory");
+        } else if (sType === "application/oipfapplicationmanager") {
             mixin(window.oipfApplicationManager, oipfPluginObject);
             window.signalopenhbbtvbrowser && window.signalopenhbbtvbrowser("LOG:OIPF object bound type=" + rawType + " id=" + sId + " object=applicationManager");
         } else if (sType === "application/oipfconfiguration") {
@@ -30961,6 +31083,12 @@ const hbbtvFn = function () {
         } else if (sType === "application/oipfcapabilities" || sType === "oipfcapabilities") {
             mixin(window.oipfCapabilities, oipfPluginObject);
             window.signalopenhbbtvbrowser && window.signalopenhbbtvbrowser("LOG:OIPF object bound type=" + rawType + " id=" + sId + " object=capabilities");
+        } else if (sType === "application/oipfparentalcontrolmanager") {
+            mixin(window.oipfParentalControlManager, oipfPluginObject);
+            window.signalopenhbbtvbrowser && window.signalopenhbbtvbrowser("LOG:OIPF object bound type=" + rawType + " id=" + sId + " object=parentalControlManager");
+        } else if (sType === "application/oipfsearchmanager") {
+            mixin(window.oipfSearchManager, oipfPluginObject);
+            window.signalopenhbbtvbrowser && window.signalopenhbbtvbrowser("LOG:OIPF object bound type=" + rawType + " id=" + sId + " object=searchManager");
         }
     }
 };
@@ -31188,6 +31316,68 @@ function init() {
     Object(_hbbtv_js__WEBPACK_IMPORTED_MODULE_1__["hbbtvFn"])();
 
     new _hbb_video_handler_js__WEBPACK_IMPORTED_MODULE_2__["VideoHandler"]().initialize();
+
+    window.__openatvHbbtvAuditApi = function(reason) {
+        if (window.OPENHBBTV_API_AUDIT_DEBUG !== true) {
+            return;
+        }
+        try {
+            var missing = [];
+            var present = [];
+            var unsupported = [];
+            var check = function(name, ok) {
+                (ok ? present : missing).push(name);
+            };
+            var factory = window.oipfObjectFactory || {};
+            var appMgr = window.oipfApplicationManager || {};
+            var ownerApp = null;
+            try {
+                ownerApp = typeof appMgr.getOwnerApplication === 'function' ? appMgr.getOwnerApplication(document) : null;
+            } catch (ignoreOwnerApp) {
+            }
+            check('oipfObjectFactory.isObjectSupported', typeof factory.isObjectSupported === 'function');
+            check('oipfObjectFactory.createVideoBroadcastObject', typeof factory.createVideoBroadcastObject === 'function');
+            check('oipfApplicationManager.getOwnerApplication', typeof appMgr.getOwnerApplication === 'function');
+            check('Application.privateData.keyset.setValue', !!(ownerApp && ownerApp.privateData && ownerApp.privateData.keyset && typeof ownerApp.privateData.keyset.setValue === 'function'));
+            check('Application.privateData.currentChannel', !!(ownerApp && ownerApp.privateData && ownerApp.privateData.currentChannel));
+            check('Application.privateData.getFreeMem', !!(ownerApp && ownerApp.privateData && typeof ownerApp.privateData.getFreeMem === 'function'));
+            check('Application.show', !!(ownerApp && typeof ownerApp.show === 'function'));
+            check('Application.hide', !!(ownerApp && typeof ownerApp.hide === 'function'));
+            check('Application.createApplication', !!(ownerApp && typeof ownerApp.createApplication === 'function'));
+            check('Application.destroyApplication', !!(ownerApp && typeof ownerApp.destroyApplication === 'function'));
+            check('oipfConfiguration.configuration', !!(window.oipfConfiguration && window.oipfConfiguration.configuration));
+            check('oipfCapabilities.xmlCapabilities', !!(window.oipfCapabilities && window.oipfCapabilities.xmlCapabilities));
+            check('oipfCapabilities.hasCapability', !!(window.oipfCapabilities && typeof window.oipfCapabilities.hasCapability === 'function'));
+            check('oipfParentalControlManager.isRatingBlocked', !!(window.oipfParentalControlManager && typeof window.oipfParentalControlManager.isRatingBlocked === 'function'));
+            check('oipfSearchManager.createSearch', !!(window.oipfSearchManager && typeof window.oipfSearchManager.createSearch === 'function'));
+            check('KeyEvent.colourKeys', !!(window.KeyEvent && window.KeyEvent.VK_RED === 403 && window.KeyEvent.VK_GREEN === 404 && window.KeyEvent.VK_YELLOW === 405 && window.KeyEvent.VK_BLUE === 406));
+            var videoBroadcast = document.getElementById('videoBroadcast');
+            if (videoBroadcast) {
+                check('videoBroadcast.bindToCurrentChannel', typeof videoBroadcast.bindToCurrentChannel === 'function');
+                check('videoBroadcast.stop', typeof videoBroadcast.stop === 'function');
+                check('videoBroadcast.getChannelConfig', typeof videoBroadcast.getChannelConfig === 'function');
+                check('videoBroadcast.getComponents', typeof videoBroadcast.getComponents === 'function');
+                check('videoBroadcast.getCurrentActiveComponents', typeof videoBroadcast.getCurrentActiveComponents === 'function');
+                check('videoBroadcast.addStreamEventListener', typeof videoBroadcast.addStreamEventListener === 'function');
+            } else {
+                unsupported.push('videoBroadcast:not-in-dom');
+            }
+            if (typeof factory.isObjectSupported === 'function') {
+                ['application/oipfDownloadManager', 'application/oipfDrmAgent', 'application/oipfRecordingScheduler', 'application/hbbtvMediaSynchroniser', 'application/hbbtvCSManager'].forEach(function(type) {
+                    if (!factory.isObjectSupported(type)) {
+                        unsupported.push(type);
+                    }
+                });
+            }
+            window.signalopenhbbtvbrowser('LOG:HBBTVAPI audit reason=' + reason +
+                ' present=' + present.length +
+                ' missing=' + (missing.length ? missing.join('|') : 'none') +
+                ' unsupported=' + (unsupported.length ? unsupported.join('|') : 'none'));
+        } catch (error) {
+            window.signalopenhbbtvbrowser('LOG:HBBTVAPI audit failed reason=' + reason + ' error=' + error);
+        }
+    };
+    window.__openatvHbbtvAuditApi('init');
 
     window.HBBTV_POLYFILL_DEBUG && console.log("hbbtv-polyfill: loaded");
 }

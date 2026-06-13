@@ -497,16 +497,19 @@ void WebView::injectXmlHttpRequestScripts()
         const bool hbbtvHttpBodyDebug = openHbbTVEnvEnabled("OPENHBBTV_HBBTV_HTTP_BODY_DEBUG", false);
         const bool zdfConsoleDebug = openHbbTVEnvEnabled("OPENHBBTV_ZDF_CONSOLE_DEBUG", false);
         const bool zdfBootDebug = openHbbTVEnvEnabled("OPENHBBTV_ZDF_BOOT_DEBUG", false);
+        const bool apiAuditDebug = openHbbTVEnvEnabled("OPENHBBTV_API_AUDIT_DEBUG", false);
         source.prepend(QStringLiteral("window.OPENHBBTV_AUTH_HTTP_DEBUG=%1;\n"
                                       "window.OPENHBBTV_HBBTV_HTTP_DEBUG=%2;\n"
                                       "window.OPENHBBTV_HBBTV_HTTP_BODY_DEBUG=%3;\n"
                                       "window.OPENHBBTV_ZDF_CONSOLE_DEBUG=%4;\n"
-                                      "window.OPENHBBTV_ZDF_BOOT_DEBUG=%5;\n")
+                                      "window.OPENHBBTV_ZDF_BOOT_DEBUG=%5;\n"
+                                      "window.OPENHBBTV_API_AUDIT_DEBUG=%6;\n")
                            .arg(authHttpDebug ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(hbbtvHttpDebug ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(hbbtvHttpBodyDebug ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(zdfConsoleDebug ? QStringLiteral("true") : QStringLiteral("false"))
-                           .arg(zdfBootDebug ? QStringLiteral("true") : QStringLiteral("false")));
+                           .arg(zdfBootDebug ? QStringLiteral("true") : QStringLiteral("false"))
+                           .arg(apiAuditDebug ? QStringLiteral("true") : QStringLiteral("false")));
 
         QWebEngineScript script;
         script.setName("xmlhttprequest_quirks");
