@@ -30003,7 +30003,10 @@ class OipfAVControlMapper {
             window.addEventListener("keydown", openhbbtvKeyLogger, true);
             window.addEventListener("keyup", openhbbtvKeyLogger, true);
         }
-        window.HBBTV_POLYFILL_NS.setStreamState = function (state, error) {
+        window.HBBTV_POLYFILL_NS.setStreamState = function (state, error, options) {
+            options = options || {};
+            var silentEvent = !!options.silentEvent;
+            var silentReason = options.reason || '';
             try {
                 var session = window.HBBTV_POLYFILL_NS.openHbbtvMediaSession;
                 if (session) {
@@ -30018,12 +30021,17 @@ class OipfAVControlMapper {
             } catch (ignoreSessionState) {
             }
             var objects = window.HBBTV_POLYFILL_NS.avControlObjects || [];
+            var connectedObjects = 0;
             objects.forEach(function (obj) {
                 if (!obj || !obj.isConnected) {
                     return;
                 }
+                connectedObjects += 1;
                 obj.playState = state;
                 obj.error = error;
+                if (silentEvent) {
+                    return;
+                }
                 var playerEvent = new Event('PlayStateChange');
                 playerEvent.state = state;
                 if (obj.onPlayStateChange) {
@@ -30031,9 +30039,15 @@ class OipfAVControlMapper {
                 }
                 obj.dispatchEvent(playerEvent);
             });
+            if (silentEvent && window.signalopenhbbtvbrowser) {
+                window.signalopenhbbtvbrowser("LOG:setStreamState silent state=" + state + " error=" + error + " objects=" + connectedObjects + " reason=" + silentReason);
+            }
         };
         if (window.HBBTV_POLYFILL_NS.pendingStreamState) {
-            window.HBBTV_POLYFILL_NS.setStreamState(window.HBBTV_POLYFILL_NS.pendingStreamState[0], window.HBBTV_POLYFILL_NS.pendingStreamState[1]);
+            window.HBBTV_POLYFILL_NS.setStreamState(
+                window.HBBTV_POLYFILL_NS.pendingStreamState[0],
+                window.HBBTV_POLYFILL_NS.pendingStreamState[1],
+                window.HBBTV_POLYFILL_NS.pendingStreamState[2] || null);
             window.HBBTV_POLYFILL_NS.pendingStreamState = null;
         }
         this.avControlObject.__openhbbtvMapper = this;

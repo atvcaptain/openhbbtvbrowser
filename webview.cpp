@@ -2,6 +2,7 @@
 #include "browsercontrol.h"
 #include "virtualkey.h"
 #include <QApplication>
+#include <QByteArray>
 #include <QCursor>
 #include <QGuiApplication>
 #include <QScreen>
@@ -22,8 +23,10 @@
 WebView::WebView(QWidget *parent)
     : QWebEngineView(parent)
     , m_streamState(0)
+    , m_streamError(-1)
     , m_streamOverlayVisible(true)
     , m_streamOverlayLowered(false)
+    , m_silentPlayingStatePending(false)
     , m_streamOverlayHoldUntilMs(0)
     , m_streamOverlayGeometryValid(false)
     , m_jsTimeoutRecoveryPending(false)
@@ -416,6 +419,42 @@ void WebView::showApplicationOverlay(const QString &reason)
         "  } catch (e) {}"
         "  try { window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('focus')); } catch (e) {}"
         "})();"));
+    if (m_silentPlayingStatePending && m_streamState == 1) {
+        QTimer::singleShot(180, this, [this, reason]() {
+            syncDeferredStreamStateToApplication(reason);
+        });
+    }
+}
+
+void WebView::syncDeferredStreamStateToApplication(const QString &reason)
+{
+    if (!m_silentPlayingStatePending || m_streamState != 1 || !m_streamOverlayVisible)
+        return;
+
+    const QString syncValue = QString::fromLocal8Bit(qgetenv("OPENHBBTV_STREAM_SYNC_PLAYING_ON_OVERLAY")).trimmed().toLower();
+    const bool syncEnabled = syncValue.isEmpty()
+        || syncValue == QStringLiteral("1")
+        || syncValue == QStringLiteral("yes")
+        || syncValue == QStringLiteral("true")
+        || syncValue == QStringLiteral("on")
+        || syncValue == QStringLiteral("enabled");
+    if (!syncEnabled) {
+        qDebug() << "[OpenHbbTV] deferred stream state visible sync disabled" << reason;
+        return;
+    }
+
+    m_silentPlayingStatePending = false;
+    qDebug() << "[OpenHbbTV] sync deferred stream playing state to visible overlay" << reason
+             << "error" << m_streamError;
+    QString script = QString::fromLatin1("(function() {"
+                                         "  window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};"
+                                         "  if (typeof window.HBBTV_POLYFILL_NS.setStreamState === 'function') {"
+                                         "    window.HBBTV_POLYFILL_NS.setStreamState(1, %1, { reason: 'overlay-visible-sync' });"
+                                         "  } else {"
+                                         "    window.HBBTV_POLYFILL_NS.pendingStreamState = [1, %1, { reason: 'overlay-visible-sync' }];"
+                                         "  }"
+                                         "})();").arg(m_streamError);
+    runJavaScriptWithWatchdog(QStringLiteral("setStreamState visible sync 1,%1").arg(m_streamError), script);
 }
 
 void WebView::hideApplicationOverlay(const QString &reason)
@@ -546,15 +585,32 @@ void WebView::refreshApplicationAfterTeletextReturn()
 void WebView::setStreamState(int state, int error)
 {
     m_streamState = state;
-    qDebug() << "[OpenHbbTV] setStreamState" << state << error;
+    m_streamError = error;
+    const QString silentPlayingValue = QString::fromLocal8Bit(qgetenv("OPENHBBTV_STREAM_SILENT_PLAYING_STATE")).trimmed().toLower();
+    const bool silentPlayingState = state == 1 && !m_streamOverlayVisible &&
+        (silentPlayingValue == QStringLiteral("1") ||
+         silentPlayingValue == QStringLiteral("yes") ||
+         silentPlayingValue == QStringLiteral("true") ||
+         silentPlayingValue == QStringLiteral("on") ||
+         silentPlayingValue == QStringLiteral("enabled"));
+    const QString streamStateOptions = silentPlayingState
+        ? QStringLiteral(", { silentEvent: true, reason: 'hidden-e2-playback' }")
+        : QString();
+    if (silentPlayingState)
+        m_silentPlayingStatePending = true;
+    else
+        m_silentPlayingStatePending = false;
+    qDebug() << "[OpenHbbTV] setStreamState" << state << error
+             << "overlayVisible" << m_streamOverlayVisible
+             << "silentPlayingEvent" << silentPlayingState;
     QString s = QString::fromLatin1("(function() {"
                                     "  window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};"
                                     "  if (typeof window.HBBTV_POLYFILL_NS.setStreamState === 'function') {"
-                                    "    window.HBBTV_POLYFILL_NS.setStreamState(%1, %2);"
+                                    "    window.HBBTV_POLYFILL_NS.setStreamState(%1, %2%3);"
                                     "  } else {"
-                                    "    window.HBBTV_POLYFILL_NS.pendingStreamState = [%1, %2];"
+                                    "    window.HBBTV_POLYFILL_NS.pendingStreamState = [%1, %2%3];"
                                     "  }"
-                                    "})();").arg(state).arg(error);
+                                    "})();").arg(state).arg(error).arg(streamStateOptions);
     runJavaScriptWithWatchdog(QStringLiteral("setStreamState %1,%2").arg(state).arg(error), s);
     if (state == 1) {
         // When external E2 playback starts the browser must get out of the

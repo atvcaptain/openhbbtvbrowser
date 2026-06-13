@@ -93,6 +93,7 @@ private:
     void repaintOverlaySurface(const QString &reason);
     void retryOverlayRepaint(const QString &reason, int delayMs);
     void retryStreamOverlayVisible(const QString &reason, int delayMs);
+    void syncDeferredStreamStateToApplication(const QString &reason);
     void requestRestartApplicationOnce(const QString &reason);
     bool isInitialUrl(const QUrl &candidate) const;
     void injectKeyEvent(int keyCode);
@@ -102,8 +103,10 @@ private:
     QUrl m_initialUrl;
     QString m_lastBroadcastInfo;
     int m_streamState;
+    int m_streamError;
     bool m_streamOverlayVisible;
     bool m_streamOverlayLowered;
+    bool m_silentPlayingStatePending;
     qint64 m_streamOverlayHoldUntilMs;
     QRect m_streamOverlaySavedGeometry;
     bool m_streamOverlayGeometryValid;
