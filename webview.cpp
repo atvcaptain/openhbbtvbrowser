@@ -891,7 +891,6 @@ bool WebView::handleStreamKeyFallback(int keyCode)
         return false;
     }
     case VirtualKey::VK_STOP:
-    case VirtualKey::VK_BACK:
         qDebug() << "[OpenHbbTV] direct stream stop fallback for key" << keyCode;
         m_streamState = 0;
         emit hbbtvCommand(CommandClient::CommandStopStream, QString());
@@ -1115,7 +1114,7 @@ void WebView::sendKeyEvent(const int &keyCode)
     if (isStreamActive())
         showApplicationOverlay(QStringLiteral("stream key"));
 
-    if (keyCode == VirtualKey::VK_BACK) {
+    if (keyCode == VirtualKey::VK_BACK && !isStreamActive()) {
         if (!page()->history()->canGoBack()) {
             if (!m_quitMsgStatus) {
                 m_quitMsg->show();
