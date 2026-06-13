@@ -13,6 +13,7 @@
 #include <atomic>
 
 class QWebEnginePage;
+class WebPage;
 
 class OpenHbbTVRequestInterceptor : public QWebEngineUrlRequestInterceptor {
 public:
@@ -116,6 +117,8 @@ private:
     bool handleTeletextDigit(int keyCode);
     void flushTeletextDigitBuffer();
     void beginTeletextReturn();
+    void openTeletextPage(const QUrl &teletextUrl);
+    bool switchBackFromTeletextPage();
     void loadInitialUrlAfterTeletextReturn(int delayMs);
     void resetPageForTeletextReturn();
     void refreshApplicationAfterTeletextReturn();
@@ -173,6 +176,9 @@ private:
     QString m_lastTitle;
     bool m_teletextReturnInProgress;
     QUrl m_teletextReturnUrl;
+    QPointer<WebPage> m_applicationPage;
+    QPointer<WebPage> m_teletextPage;
+    bool m_usingTeletextPage;
     QString m_teletextDigitBuffer;
     QTimer *m_teletextDigitTimer;
     QLabel *m_quitMsg;

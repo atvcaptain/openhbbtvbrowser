@@ -129,6 +129,7 @@ WebView::WebView(QWidget *parent)
     , m_currentTsid(-1)
     , m_currentSid(-1)
     , m_teletextReturnInProgress(false)
+    , m_usingTeletextPage(false)
     , m_teletextDigitTimer(new QTimer(this))
     , m_quitMsg(new QLabel)
     , m_quitMsgStatus(0)
@@ -184,16 +185,36 @@ WebView::WebView(QWidget *parent)
 void WebView::attachPageDiagnostics()
 {
     QWebEnginePage *currentPage = page();
-    if (!currentPage || m_diagnosticsPage == currentPage)
+    if (!currentPage)
         return;
+
+    WebPage *webPage = qobject_cast<WebPage *>(currentPage);
+    if (webPage) {
+        if (!webPage->property("openhbbtvTeletextSignalConnected").toBool()) {
+            connect(webPage, &WebPage::teletextNavigationRequested,
+                    this, &WebView::openTeletextPage);
+            webPage->setProperty("openhbbtvTeletextSignalConnected", true);
+        }
+
+        if (!m_usingTeletextPage && !isTeletextUrl(webPage->url())) {
+            m_applicationPage = webPage;
+            webPage->setTeletextNavigationInterceptEnabled(true);
+        }
+    }
+
+    if (currentPage->property("openhbbtvDiagnosticsAttached").toBool()) {
+        m_diagnosticsPage = currentPage;
+        return;
+    }
 
     m_streamRendererFrozen = false;
     m_diagnosticsPage = currentPage;
+    currentPage->setProperty("openhbbtvDiagnosticsAttached", true);
     connect(currentPage, &QWebEnginePage::renderProcessTerminated, this,
-            [this](QWebEnginePage::RenderProcessTerminationStatus status, int exitCode) {
+            [this, currentPage](QWebEnginePage::RenderProcessTerminationStatus status, int exitCode) {
                 recordDiagnosticEvent(QStringLiteral("renderProcessTerminated status=%1 exit=%2").arg(status).arg(exitCode));
                 qWarning() << "[OpenHbbTV] renderProcessTerminated" << status << exitCode
-                           << "stream" << m_streamState << url().toString();
+                           << "stream" << m_streamState << "page" << currentPage << url().toString();
                 dumpRenderCrashDiagnostics(static_cast<int>(status), exitCode);
                 requestRestartApplicationOnce(QStringLiteral("render-process-terminated"));
             });
@@ -1110,6 +1131,101 @@ bool WebView::isInitialUrl(const QUrl &candidate) const
     return normalizedCandidate == normalizedInitial;
 }
 
+void WebView::openTeletextPage(const QUrl &teletextUrl)
+{
+    if (!teletextUrl.isValid() || teletextUrl.isEmpty())
+        return;
+
+    QWebEnginePage *currentPage = page();
+    QWebEngineProfile *profile = currentPage ? currentPage->profile() : Q_NULLPTR;
+    if (!profile) {
+        qWarning() << "[OpenHbbTV] teletext page switch skipped: no profile" << teletextUrl.toString();
+        return;
+    }
+
+    if (m_usingTeletextPage) {
+        qDebug() << "[OpenHbbTV] teletext page already active; load" << teletextUrl.toString();
+        setUrl(teletextUrl);
+        return;
+    }
+
+    WebPage *applicationPage = qobject_cast<WebPage *>(currentPage);
+    if (applicationPage)
+        m_applicationPage = applicationPage;
+
+    if (!m_applicationPage) {
+        qWarning() << "[OpenHbbTV] teletext page switch has no application page; load inline"
+                   << teletextUrl.toString();
+        setUrl(teletextUrl);
+        return;
+    }
+
+    qDebug() << "[OpenHbbTV] open teletext isolated page"
+             << "fromPage" << m_applicationPage.data()
+             << "fromUrl" << m_applicationPage->url().toString()
+             << "teletext" << teletextUrl.toString();
+    recordDiagnosticEvent(QStringLiteral("teletext isolated page open ") + diagnosticSnippet(teletextUrl.toString()));
+
+    WebPage *teletextPage = new WebPage(profile, this);
+    teletextPage->setTeletextNavigationInterceptEnabled(false);
+    m_teletextPage = teletextPage;
+    m_usingTeletextPage = true;
+
+    setPage(teletextPage);
+    attachPageDiagnostics();
+    setCursor(Qt::BlankCursor);
+    show();
+
+    injectHbbTVScripts(m_hbbtvScriptSrc.isEmpty() ? QStringLiteral("qrc:/hbbtv_polyfill.js") : m_hbbtvScriptSrc);
+    injectXmlHttpRequestScripts();
+    if (m_currentOnid != -1 && m_currentTsid != -1 && m_currentSid != -1)
+        setCurrentChannel(m_currentOnid, m_currentTsid, m_currentSid);
+    if (!m_language.isEmpty())
+        setLanguage(m_language);
+    if (!m_scriptDebugging.isEmpty())
+        setScriptDebugging(m_scriptDebugging);
+
+    setUrl(teletextUrl);
+}
+
+bool WebView::switchBackFromTeletextPage()
+{
+    if (!m_usingTeletextPage || !m_applicationPage)
+        return false;
+
+    WebPage *teletextPage = qobject_cast<WebPage *>(page());
+    qDebug() << "[OpenHbbTV] switch back from teletext isolated page"
+             << "teletextPage" << teletextPage
+             << "applicationPage" << m_applicationPage.data()
+             << "target" << m_applicationPage->url().toString();
+    recordDiagnosticEvent(QStringLiteral("teletext isolated page return ") +
+                          diagnosticSnippet(m_applicationPage->url().toString()));
+
+    m_usingTeletextPage = false;
+    setPage(m_applicationPage);
+    attachPageDiagnostics();
+    setCursor(Qt::BlankCursor);
+    show();
+
+    m_lastLoadUrl = url().toString();
+    m_teletextReturnInProgress = false;
+    m_teletextReturnUrl = QUrl();
+
+    if (teletextPage && teletextPage != m_applicationPage) {
+        teletextPage->disconnect(this);
+        teletextPage->triggerAction(QWebEnginePage::Stop);
+        teletextPage->deleteLater();
+    }
+    m_teletextPage = Q_NULLPTR;
+
+    showApplicationOverlay(QStringLiteral("teletext isolated page return"));
+    refreshApplicationAfterTeletextReturn();
+    retryOverlayRepaint(QStringLiteral("teletext isolated page return"), 80);
+    retryOverlayRepaint(QStringLiteral("teletext isolated page return"), 240);
+    emit hbbtvCommand(CommandClient::CommandPageLoadFinished, url().toString());
+    return true;
+}
+
 void WebView::loadInitialUrlAfterTeletextReturn(int delayMs)
 {
     if (!m_initialUrl.isValid() || m_initialUrl.isEmpty()) {
@@ -1179,7 +1295,10 @@ void WebView::beginTeletextReturn()
     const bool forceRestart = openHbbTVEnvEnabled("OPENHBBTV_TELETEXT_RESTART_ON_ZERO", false);
     const QString returnMode = QString::fromLocal8Bit(qgetenv("OPENHBBTV_TELETEXT_RETURN_MODE")).trimmed().toLower();
     const bool forceHistoryBack = returnMode == QStringLiteral("history");
-    const QUrl targetUrl = backUrl.isValid() && !isTeletextUrl(backUrl) ? backUrl : m_initialUrl;
+    const QUrl applicationUrl = m_applicationPage ? m_applicationPage->url() : QUrl();
+    const QUrl targetUrl = applicationUrl.isValid() && !applicationUrl.isEmpty() && !isTeletextUrl(applicationUrl)
+        ? applicationUrl
+        : (backUrl.isValid() && !isTeletextUrl(backUrl) ? backUrl : m_initialUrl);
 
     if (forceHistoryBack && !forceRestart && backUrl.isValid() && !isTeletextUrl(backUrl)) {
         m_teletextReturnUrl = backUrl;
@@ -1207,6 +1326,9 @@ void WebView::beginTeletextReturn()
         QTimer::singleShot(80, this, [this]() {
             if (!m_teletextReturnInProgress)
                 return;
+            if (switchBackFromTeletextPage())
+                return;
+            m_usingTeletextPage = false;
             resetPageForTeletextReturn();
             qDebug() << "[OpenHbbTV] load teletext direct return url" << m_teletextReturnUrl.toString();
             setUrl(m_teletextReturnUrl);
