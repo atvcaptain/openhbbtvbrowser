@@ -30822,7 +30822,9 @@ const hbbtvFn = function () {
     oipfConfiguration.configuration.preferredSubtitleLanguage = preferredLanguage;
     oipfConfiguration.configuration.preferredUILanguage = preferredLanguage;
     oipfConfiguration.configuration.countryId = preferredCountry;
-    log('oipfConfiguration preferredLanguage=' + preferredLanguage + ' countryId=' + preferredCountry);
+    if (window.signalopenhbbtvbrowser) {
+        window.signalopenhbbtvbrowser('LOG:oipfConfiguration preferredLanguage=' + preferredLanguage + ' countryId=' + preferredCountry);
+    }
     //oipfConfiguration.configuration.regionId = 0;
     //oipfConfiguration.localSystem = {};
     oipfConfiguration.getText = function (key) {
