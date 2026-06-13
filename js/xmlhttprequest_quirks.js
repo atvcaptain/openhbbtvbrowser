@@ -58,6 +58,10 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     return window.OPENHBBTV_ZDF_DIRECT_INIT_REQUEST === true;
   }
 
+  function zdfSilentBroadcastObjectEnabled() {
+    return window.OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT === true && isZdfPage();
+  }
+
   function zdfDeepProbeEnabled() {
     return window.OPENHBBTV_ZDF_DEEP_PROBE === true;
   }
@@ -456,6 +460,15 @@ window.cefXmlHttpRequestQuirk = function(uri) {
 
       function send(command) {
         try {
+          if (zdfSilentBroadcastObjectEnabled() &&
+              (command === "BROADCAST_PLAY" ||
+               command === "BROADCAST_STOP" ||
+               command === "BROADCAST_HIDDEN" ||
+               command === "UNSET_VIDEO_WINDOW" ||
+               String(command || "").indexOf("SET_VIDEO_WINDOW:") === 0)) {
+            zdfTrace("silent broadcast bridge", command);
+            return;
+          }
           if (window.signalopenhbbtvbrowser)
             window.signalopenhbbtvbrowser(command);
           else if (document && document.title !== undefined) {
@@ -626,6 +639,12 @@ window.cefXmlHttpRequestQuirk = function(uri) {
 
       function reportVideoWindow(obj) {
         try {
+          if (zdfSilentBroadcastObjectEnabled()) {
+            if (obj)
+              obj.__openhbbtvEarlyBroadcastVisible = true;
+            zdfTrace("silent broadcast video window", "skip");
+            return;
+          }
           if (!isConnected(obj) || !isVisible(obj)) {
             if (obj && obj.__openhbbtvEarlyBroadcastVisible) {
               send("BROADCAST_HIDDEN");
@@ -655,6 +674,10 @@ window.cefXmlHttpRequestQuirk = function(uri) {
         try {
           ensureBroadcastObject(obj);
           obj.playState = state;
+          if (zdfSilentBroadcastObjectEnabled()) {
+            zdfTrace("silent broadcast playstate", String(state));
+            return;
+          }
           if (typeof obj.onPlayStateChange === "function")
             obj.onPlayStateChange(state);
           if (typeof obj.dispatchEvent === "function") {
@@ -684,6 +707,11 @@ window.cefXmlHttpRequestQuirk = function(uri) {
       });
       installMethod("bindToCurrentChannel", function() {
         ensureBroadcastObject(this);
+        if (zdfSilentBroadcastObjectEnabled()) {
+          this.playState = 1;
+          zdfTrace("silent bindToCurrentChannel", "current channel only");
+          return currentChannel();
+        }
         reportVideoWindow(this);
         send("BROADCAST_PLAY");
         dispatchPlayState(this, 1);
@@ -720,6 +748,11 @@ window.cefXmlHttpRequestQuirk = function(uri) {
       installMethod("stop", function() {
         ensureBroadcastObject(this);
         namespace().lastBroadcastStopAt = Date.now ? Date.now() : (new Date()).getTime();
+        if (zdfSilentBroadcastObjectEnabled()) {
+          this.playState = 0;
+          zdfTrace("silent broadcast stop", "state only");
+          return true;
+        }
         send("BROADCAST_STOP");
         send("UNSET_VIDEO_WINDOW");
         dispatchPlayState(this, 0);
@@ -728,6 +761,11 @@ window.cefXmlHttpRequestQuirk = function(uri) {
       installMethod("release", function() {
         ensureBroadcastObject(this);
         namespace().lastBroadcastStopAt = Date.now ? Date.now() : (new Date()).getTime();
+        if (zdfSilentBroadcastObjectEnabled()) {
+          this.playState = 0;
+          zdfTrace("silent broadcast release", "state only");
+          return true;
+        }
         send("BROADCAST_STOP");
         send("UNSET_VIDEO_WINDOW");
         dispatchPlayState(this, 0);
@@ -756,6 +794,17 @@ window.cefXmlHttpRequestQuirk = function(uri) {
       installMethod("setFullScreen", function(state) {
         ensureBroadcastObject(this);
         try {
+          if (zdfSilentBroadcastObjectEnabled()) {
+            if (state) {
+              this.style.position = "fixed";
+              this.style.left = "0px";
+              this.style.top = "0px";
+              this.style.width = "100vw";
+              this.style.height = "100vh";
+            }
+            zdfTrace("silent broadcast fullscreen", String(!!state));
+            return true;
+          }
           if (state) {
             this.style.position = "fixed";
             this.style.left = "0px";

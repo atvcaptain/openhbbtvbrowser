@@ -31509,13 +31509,51 @@ class OipfVideoBroadcastMapper {
         this.injectBroadcastVideoMethods(this.oipfPluginObject);
     }
     injectBroadcastVideoMethods(oipfPluginObject) {
+        const isZdfPage = () => {
+            try {
+                const host = String((window.location && window.location.hostname) || '').toLowerCase();
+                return host === 'new-hbbtv.zdf.de' || host === 'hbbtv.zdf.de' || /\.zdf\.de$/.test(host);
+            }
+            catch (e) {
+                return false;
+            }
+        };
+        const zdfSilentBroadcastObject = () => {
+            return window.OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT === true && isZdfPage();
+        };
+        const zdfTrace = (label, value) => {
+            try {
+                if (window.OPENHBBTV_ZDF_BOOT_TRACE !== true || !isZdfPage()) {
+                    return;
+                }
+                const text = value === undefined ? '' : ' ' + String(value).substr(0, 400);
+                console.warn('[OpenHbbTV][ZDFTRACE] polyfill ' + label + text);
+            }
+            catch (e) {
+            }
+        };
+        const isBroadcastBridgeCommand = (command) => {
+            return command === "BROADCAST_PLAY" ||
+                command === "BROADCAST_STOP" ||
+                command === "BROADCAST_HIDDEN" ||
+                command === "UNSET_VIDEO_WINDOW" ||
+                String(command || '').indexOf("SET_VIDEO_WINDOW:") === 0;
+        };
         const send = (command) => {
+            if (zdfSilentBroadcastObject() && isBroadcastBridgeCommand(command)) {
+                zdfTrace('silent broadcast bridge', command);
+                return;
+            }
             if (window.signalopenhbbtvbrowser) {
                 window.signalopenhbbtvbrowser(command);
             }
         };
         const dispatchPlayState = (state) => {
             oipfPluginObject.playState = state;
+            if (zdfSilentBroadcastObject()) {
+                zdfTrace('silent broadcast playstate', state);
+                return;
+            }
             var playerEvent = new Event('PlayStateChange');
             playerEvent.state = state;
             if (oipfPluginObject.onPlayStateChange) {
@@ -31559,6 +31597,11 @@ class OipfVideoBroadcastMapper {
             }
         };
         const reportVideoWindow = () => {
+            if (zdfSilentBroadcastObject()) {
+                lastVisible = true;
+                zdfTrace('silent broadcast video window', 'skip');
+                return;
+            }
             if (!document.body || !oipfPluginObject.isConnected) {
                 clearPendingVideoWindow();
                 return;
@@ -31613,6 +31656,11 @@ class OipfVideoBroadcastMapper {
         };
         oipfPluginObject.bindToCurrentChannel = function () {
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo bindToCurrentChannel() via Enigma2 ...');
+            if (zdfSilentBroadcastObject()) {
+                oipfPluginObject.playState = 1;
+                zdfTrace('silent bindToCurrentChannel', 'current channel only');
+                return currentChannel;
+            }
             reportVideoWindow();
             send("BROADCAST_PLAY");
             dispatchPlayState(1);
@@ -31643,6 +31691,11 @@ class OipfVideoBroadcastMapper {
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo stop() ...');
             window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
             window.HBBTV_POLYFILL_NS.lastBroadcastStopAt = Date.now();
+            if (zdfSilentBroadcastObject()) {
+                oipfPluginObject.playState = 0;
+                zdfTrace('silent broadcast stop', 'state only');
+                return true;
+            }
             send("LOG:BroadcastVideo.stop without AVControl autostart fallback");
             send("BROADCAST_STOP");
             send("UNSET_VIDEO_WINDOW");
@@ -31653,6 +31706,11 @@ class OipfVideoBroadcastMapper {
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo release() ...');
             window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
             window.HBBTV_POLYFILL_NS.lastBroadcastStopAt = Date.now();
+            if (zdfSilentBroadcastObject()) {
+                oipfPluginObject.playState = 0;
+                zdfTrace('silent broadcast release', 'state only');
+                return;
+            }
             send("LOG:BroadcastVideo.release without AVControl autostart fallback");
             send("BROADCAST_STOP");
             send("UNSET_VIDEO_WINDOW");
@@ -31824,6 +31882,17 @@ class OipfVideoBroadcastMapper {
         oipfPluginObject.selectComponent = (function (cpt) { return true; }).bind(oipfPluginObject);
         oipfPluginObject.unselectComponent = (function (cpt) { return true; }).bind(oipfPluginObject);
         oipfPluginObject.setFullScreen = (function (state) {
+            if (zdfSilentBroadcastObject()) {
+                if (state) {
+                    this.style.position = 'fixed';
+                    this.style.left = '0px';
+                    this.style.top = '0px';
+                    this.style.width = '100vw';
+                    this.style.height = '100vh';
+                }
+                zdfTrace('silent broadcast fullscreen', !!state);
+                return;
+            }
             this.onFullScreenChange(state);
             if (state) {
                 this.style.position = 'fixed';
