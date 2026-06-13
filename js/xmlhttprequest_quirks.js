@@ -34,6 +34,23 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     return window.OPENHBBTV_HBBTV_HTTP_BODY_DEBUG === true;
   }
 
+  function zdfConsoleDebugEnabled() {
+    return window.OPENHBBTV_ZDF_CONSOLE_DEBUG === true;
+  }
+
+  function zdfBootDebugEnabled() {
+    return window.OPENHBBTV_ZDF_BOOT_DEBUG === true;
+  }
+
+  function isZdfPage() {
+    try {
+      var host = String((window.location && window.location.hostname) || "").toLowerCase();
+      return host === "new-hbbtv.zdf.de" || host === "hbbtv.zdf.de" || /\.zdf\.de$/.test(host);
+    } catch (ignore) {
+      return false;
+    }
+  }
+
   function shouldLogAuth(url) {
     url = String(url || "");
     return url.indexOf("accounts.ard.de/device/") >= 0 ||
@@ -71,6 +88,32 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     return text.length > 420 ? text.slice(0, 420) + "..." : text;
   }
 
+  function stackText(error) {
+    try {
+      return String((error && error.stack) || error || "").replace(/\s+/g, " ").slice(0, 260);
+    } catch (ignore) {
+      return "[stack-unreadable]";
+    }
+  }
+
+  function describeValue(value) {
+    try {
+      if (value === undefined)
+        return "undefined";
+      if (value === null)
+        return "null";
+      if (Array.isArray(value))
+        return "array(" + value.length + ")";
+      if (typeof value === "object")
+        return "object{" + Object.keys(value).slice(0, 8).join("|") + "}";
+      if (typeof value === "string")
+        return "string(" + value.length + ") " + value.slice(0, 80).replace(/\s+/g, " ");
+      return typeof value + "(" + String(value) + ")";
+    } catch (ignore) {
+      return Object.prototype.toString.call(value);
+    }
+  }
+
   function bodyText(body) {
     try {
       if (body === undefined || body === null)
@@ -91,6 +134,46 @@ window.cefXmlHttpRequestQuirk = function(uri) {
       return JSON.stringify(body);
     } catch (ignore) {
       return "[unreadable]";
+    }
+  }
+
+  function logPieces(label, prefix, text) {
+    text = String(text || "");
+    if (!text) {
+      log(label, prefix);
+      return;
+    }
+    for (var pos = 0; pos < text.length; pos += 300)
+      log(label, prefix + " " + text.slice(pos, pos + 300));
+  }
+
+  function logZdfInitDetails(url, body) {
+    try {
+      if (!zdfBootDebugEnabled() || String(url || "").toLowerCase().indexOf("/al/init") < 0)
+        return;
+      var value = JSON.parse(String(body || ""));
+      var dataObj = value && value.data && typeof value.data === "object" ? value.data : null;
+      if (!dataObj)
+        return;
+      var keys = Object.keys(dataObj);
+      var typed = [];
+      for (var i = 0; i < keys.length; i++)
+        typed.push(keys[i] + "=" + describeValue(dataObj[keys[i]]));
+      logPieces("ZDFINIT", "keys", keys.join("|"));
+      logPieces("ZDFINIT", "types", typed.join(" "));
+      log("ZDFINIT", "runtime search=" + String(window.location && window.location.search || "") +
+          " entriesProbe=" + !!(Object.entries && Object.entries.__openhbbtvZdfProbe) +
+          " fromEntriesProbe=" + !!(Object.fromEntries && Object.fromEntries.__openhbbtvZdfProbe) +
+          " mapProbe=" + !!(Array.prototype.map && Array.prototype.map.__openhbbtvZdfProbe) +
+          " allSettled=" + (window.Promise && Promise.allSettled ? typeof Promise.allSettled : "missing"));
+      if (dataObj.texts && typeof dataObj.texts === "object")
+        logPieces("ZDFINIT", "texts", Object.keys(dataObj.texts).join("|"));
+      if (dataObj.menuItems && dataObj.menuItems.length)
+        log("ZDFINIT", "menuFirst " + describeValue(dataObj.menuItems[0]));
+      if (dataObj.tracking !== undefined)
+        log("ZDFINIT", "tracking " + describeValue(dataObj.tracking));
+    } catch (error) {
+      log("ZDFINIT", "detail failed " + stackText(error));
     }
   }
 
@@ -147,6 +230,167 @@ window.cefXmlHttpRequestQuirk = function(uri) {
         document.title = "OPENATV_HBBTV:" + command + "||early" + window.__openhbbtvEarlyLogSeq;
       }
     } catch (ignore) {}
+  }
+
+  function installZdfConsoleFlag() {
+    if (!zdfConsoleDebugEnabled() || !isZdfPage())
+      return;
+    try {
+      if (/[?&]console=(1|true)(?:&|$)/i.test(window.location.search))
+        return;
+      var nextUrl = "";
+      if (typeof URL === "function") {
+        var url = new URL(window.location.href);
+        url.searchParams.set("console", "1");
+        nextUrl = url.toString();
+      } else {
+        nextUrl = window.location.href + (window.location.search ? "&" : "?") + "console=1";
+      }
+      window.history.replaceState(window.history.state, document.title, nextUrl);
+      log("ZDFBOOT", "console query enabled " + nextUrl);
+    } catch (error) {
+      log("ZDFBOOT", "console query failed " + stackText(error));
+    }
+  }
+
+  function stringifyConsoleArg(arg) {
+    try {
+      if (arg instanceof Error)
+        return arg.name + ": " + arg.message + " " + stackText(arg);
+      if (arg === undefined)
+        return "undefined";
+      if (arg === null)
+        return "null";
+      if (typeof arg === "string")
+        return arg;
+      var json = JSON.stringify(arg);
+      return json === undefined ? String(arg) : json;
+    } catch (ignore) {
+      return String(arg);
+    }
+  }
+
+  function installZdfConsoleBridge() {
+    if (!zdfConsoleDebugEnabled() || !isZdfPage() || !window.console || window.console.__openhbbtvZdfBridge)
+      return;
+    try {
+      var levels = ["log", "info", "warn", "error", "debug"];
+      var count = 0;
+      for (var i = 0; i < levels.length; i++) {
+        (function(level) {
+          var original = typeof window.console[level] === "function" ? window.console[level] : function() {};
+          window.console[level] = function() {
+            try {
+              if (count < 120) {
+                var parts = [];
+                for (var j = 0; j < arguments.length; j++)
+                  parts.push(stringifyConsoleArg(arguments[j]));
+                count++;
+                log("ZDFCONSOLE", level + " " + parts.join(" "));
+              }
+            } catch (ignore) {}
+            return original.apply(window.console, arguments);
+          };
+        })(levels[i]);
+      }
+      window.console.__openhbbtvZdfBridge = true;
+      log("ZDFBOOT", "console bridge installed");
+    } catch (error) {
+      log("ZDFBOOT", "console bridge failed " + stackText(error));
+    }
+  }
+
+  function installZdfBootstrapProbe() {
+    if (!zdfBootDebugEnabled() || !isZdfPage())
+      return;
+
+    try {
+      if (Object.entries && !Object.entries.__openhbbtvZdfProbe) {
+        var originalEntries = Object.entries;
+        var wrappedEntries = function(obj) {
+          try {
+            var result = originalEntries.apply(Object, arguments);
+            if (Array.isArray(result)) {
+              for (var i = 0; i < result.length && i < 16; i++) {
+                if (!result[i] || result[i].length < 2)
+                  log("ZDFBOOT", "Object.entries invalid i=" + i + " len=" + result.length +
+                      " entry=" + describeValue(result[i]) + " caller=" + stackText(new Error("caller")));
+              }
+            }
+            return result;
+          } catch (error) {
+            log("ZDFBOOT", "Object.entries failed arg=" + describeValue(obj) +
+                " error=" + stackText(error) + " caller=" + stackText(new Error("caller")));
+            throw error;
+          }
+        };
+        wrappedEntries.__openhbbtvZdfProbe = true;
+        Object.entries = wrappedEntries;
+      }
+
+      if (Object.fromEntries && !Object.fromEntries.__openhbbtvZdfProbe) {
+        var originalFromEntries = Object.fromEntries;
+        var wrappedFromEntries = function(iterable) {
+          try {
+            if (!iterable)
+              log("ZDFBOOT", "Object.fromEntries empty iterable=" + describeValue(iterable) +
+                  " caller=" + stackText(new Error("caller")));
+            return originalFromEntries.apply(Object, arguments);
+          } catch (error) {
+            log("ZDFBOOT", "Object.fromEntries failed arg=" + describeValue(iterable) +
+                " error=" + stackText(error) + " caller=" + stackText(new Error("caller")));
+            throw error;
+          }
+        };
+        wrappedFromEntries.__openhbbtvZdfProbe = true;
+        Object.fromEntries = wrappedFromEntries;
+      }
+
+      if (Array.prototype.map && !Array.prototype.map.__openhbbtvZdfProbe) {
+        var originalMap = Array.prototype.map;
+        var wrappedMap = function() {
+          try {
+            return originalMap.apply(this, arguments);
+          } catch (error) {
+            log("ZDFBOOT", "Array.map failed len=" + (this && this.length !== undefined ? this.length : "?") +
+                " first=" + describeValue(this && this[0]) + " error=" + stackText(error));
+            throw error;
+          }
+        };
+        wrappedMap.__openhbbtvZdfProbe = true;
+        Array.prototype.map = wrappedMap;
+      }
+
+      if (window.Promise && Promise.allSettled && !Promise.allSettled.__openhbbtvZdfProbe) {
+        var originalAllSettled = Promise.allSettled;
+        var wrappedAllSettled = function(iterable) {
+          try {
+            if (!iterable)
+              log("ZDFBOOT", "Promise.allSettled empty iterable=" + describeValue(iterable) +
+                  " caller=" + stackText(new Error("caller")));
+            return originalAllSettled.apply(Promise, arguments);
+          } catch (error) {
+            log("ZDFBOOT", "Promise.allSettled failed arg=" + describeValue(iterable) +
+                " error=" + stackText(error));
+            throw error;
+          }
+        };
+        wrappedAllSettled.__openhbbtvZdfProbe = true;
+        Promise.allSettled = wrappedAllSettled;
+      }
+
+      log("ZDFBOOT", "bootstrap probe installed");
+    } catch (error) {
+      log("ZDFBOOT", "bootstrap probe failed " + stackText(error));
+    }
+  }
+
+  try {
+    installZdfConsoleFlag();
+    installZdfConsoleBridge();
+    installZdfBootstrapProbe();
+  } catch (error) {
+    log("ZDFBOOT", "diagnostics install failed " + stackText(error));
   }
 
   function installChunkProbe(name) {
@@ -207,6 +451,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
                 (requestBody ? " request=" + requestBody : "") +
                 responseDetail(label, xhr.__openhbbtvAuthUrl, body));
           });
+          logZdfInitDetails(xhr.__openhbbtvAuthUrl, body);
         });
       }
       return originalSend.apply(this, arguments);
@@ -238,6 +483,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
                       (requestBody ? " request=" + requestBody : "") +
                       responseDetail(label, url, body));
                 });
+                logZdfInitDetails(url, body);
               }).catch(function(error) {
                 labels.forEach(function(label) {
                   log(label, "fetch body failed " + method + " " + url +
