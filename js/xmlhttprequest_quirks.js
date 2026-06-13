@@ -38,8 +38,16 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     return window.OPENHBBTV_ZDF_CONSOLE_DEBUG === true;
   }
 
+  function zdfConsoleQueryEnabled() {
+    return window.OPENHBBTV_ZDF_CONSOLE_QUERY === true || zdfConsoleDebugEnabled();
+  }
+
   function zdfBootDebugEnabled() {
     return window.OPENHBBTV_ZDF_BOOT_DEBUG === true;
+  }
+
+  function zdfBootTraceEnabled() {
+    return window.OPENHBBTV_ZDF_BOOT_TRACE === true;
   }
 
   function zdfDeepProbeEnabled() {
@@ -131,14 +139,16 @@ window.cefXmlHttpRequestQuirk = function(uri) {
 
       function install() {
         try {
-          if (Object.entries !== stableEntries) {
+          if (Object.entries !== stableEntries &&
+              !(Object.entries && Object.entries.__openhbbtvZdfStableObjectEntries)) {
             Object.defineProperty(Object, "entries", {
               configurable: true,
               writable: true,
               value: stableEntries
             });
           }
-          if (Object.fromEntries !== stableFromEntries) {
+          if (Object.fromEntries !== stableFromEntries &&
+              !(Object.fromEntries && Object.fromEntries.__openhbbtvZdfStableObjectEntries)) {
             Object.defineProperty(Object, "fromEntries", {
               configurable: true,
               writable: true,
@@ -226,6 +236,30 @@ window.cefXmlHttpRequestQuirk = function(uri) {
       return typeof value + "(" + String(value) + ")";
     } catch (ignore) {
       return Object.prototype.toString.call(value);
+    }
+  }
+
+  function zdfTrace(label, text) {
+    try {
+      if (!zdfBootTraceEnabled() || !isZdfPage() || !window.console)
+        return;
+      var message = "[OpenHbbTV][ZDFTRACE] " + label + (text ? " " + mask(text) : "");
+      if (typeof window.console.warn === "function")
+        window.console.warn(message);
+      else if (typeof window.console.log === "function")
+        window.console.log(message);
+    } catch (ignore) {}
+  }
+
+  function zdfTraceErrorWanted(error) {
+    try {
+      var text = stackText(error);
+      return text.indexOf("Cannot read property '0'") >= 0 ||
+             text.indexOf("Cannot read properties of undefined") >= 0 ||
+             text.indexOf("reading '0'") >= 0 ||
+             text.indexOf("appConfigLoader getInit") >= 0;
+    } catch (ignore) {
+      return false;
     }
   }
 
@@ -806,7 +840,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
   }
 
   function installZdfConsoleFlag() {
-    if (!zdfConsoleDebugEnabled() || !isZdfPage())
+    if (!zdfConsoleQueryEnabled() || !isZdfPage())
       return;
     try {
       if (/[?&]console=(1|true)(?:&|$)/i.test(window.location.search))
@@ -823,6 +857,217 @@ window.cefXmlHttpRequestQuirk = function(uri) {
       log("ZDFBOOT", "console query enabled " + nextUrl);
     } catch (error) {
       log("ZDFBOOT", "console query failed " + stackText(error));
+    }
+  }
+
+  function installZdfBootTrace() {
+    if (!zdfBootTraceEnabled() || !isZdfPage() || window.__openhbbtvZdfBootTraceInstalled)
+      return;
+
+    try {
+      window.__openhbbtvZdfBootTraceInstalled = true;
+      var traceCount = 0;
+
+      function limitedTrace(label, text) {
+        if (traceCount >= 120)
+          return;
+        traceCount++;
+        zdfTrace(label + " #" + traceCount, text);
+      }
+
+      limitedTrace("installed", "href=" + window.location.href +
+          " entriesStable=" + !!(Object.entries && Object.entries.__openhbbtvZdfStableObjectEntries) +
+          " fromEntriesStable=" + !!(Object.fromEntries && Object.fromEntries.__openhbbtvZdfStableObjectEntries));
+
+      if (Object.entries && !Object.entries.__openhbbtvZdfBootTrace) {
+        var originalEntries = Object.entries;
+        var tracedEntries = function(obj) {
+          try {
+            var result = originalEntries.apply(Object, arguments);
+            if (Array.isArray(result)) {
+              for (var i = 0; i < result.length && i < 24; i++) {
+                if (!result[i] || result[i].length < 2) {
+                  limitedTrace("Object.entries invalid entry",
+                      "i=" + i + " len=" + result.length +
+                      " entry=" + describeValue(result[i]) +
+                      " arg=" + describeValue(obj) +
+                      " caller=" + stackText(new Error("entries caller")));
+                }
+              }
+            }
+            return result;
+          } catch (error) {
+            limitedTrace("Object.entries failed",
+                "arg=" + describeValue(obj) +
+                " error=" + stackText(error) +
+                " caller=" + stackText(new Error("entries caller")));
+            throw error;
+          }
+        };
+        tracedEntries.__openhbbtvZdfBootTrace = true;
+        if (originalEntries.__openhbbtvZdfStableObjectEntries)
+          tracedEntries.__openhbbtvZdfStableObjectEntries = true;
+        Object.entries = tracedEntries;
+      }
+
+      if (Object.fromEntries && !Object.fromEntries.__openhbbtvZdfBootTrace) {
+        var originalFromEntries = Object.fromEntries;
+        var tracedFromEntries = function(iterable) {
+          try {
+            if (iterable === null || iterable === undefined) {
+              limitedTrace("Object.fromEntries empty input",
+                  "iterable=" + describeValue(iterable) +
+                  " caller=" + stackText(new Error("fromEntries caller")));
+            } else {
+              var object = Object(iterable);
+              var length = Number(object.length);
+              if (length === length && length >= 0) {
+                for (var i = 0; i < length && i < 24; i++) {
+                  if (!(i in object)) {
+                    limitedTrace("Object.fromEntries input hole",
+                        "i=" + i + " len=" + length +
+                        " caller=" + stackText(new Error("fromEntries caller")));
+                  } else {
+                    var entry = object[i];
+                    var entryLooksShort = false;
+                    if (entry !== null && entry !== undefined &&
+                        (typeof entry === "object" || typeof entry === "function")) {
+                      var entryObject = Object(entry);
+                      var entryLength = Number(entryObject.length);
+                      entryLooksShort = entryLength === entryLength ? entryLength < 2 :
+                          (!(0 in entryObject) || !(1 in entryObject));
+                    }
+                    if (entry === null || entry === undefined ||
+                        (typeof entry !== "object" && typeof entry !== "function") ||
+                        entryLooksShort) {
+                      limitedTrace("Object.fromEntries suspect entry",
+                          "i=" + i + " len=" + length +
+                          " entry=" + describeValue(entry) +
+                          " caller=" + stackText(new Error("fromEntries caller")));
+                    }
+                  }
+                }
+              }
+            }
+            return originalFromEntries.apply(Object, arguments);
+          } catch (error) {
+            limitedTrace("Object.fromEntries failed",
+                "arg=" + describeValue(iterable) +
+                " error=" + stackText(error) +
+                " caller=" + stackText(new Error("fromEntries caller")));
+            throw error;
+          }
+        };
+        tracedFromEntries.__openhbbtvZdfBootTrace = true;
+        if (originalFromEntries.__openhbbtvZdfStableObjectEntries)
+          tracedFromEntries.__openhbbtvZdfStableObjectEntries = true;
+        Object.fromEntries = tracedFromEntries;
+      }
+
+      if (Array.prototype.map && !Array.prototype.map.__openhbbtvZdfBootTrace) {
+        var originalMap = Array.prototype.map;
+        var tracedMap = function(callback, thisArg) {
+          if (typeof callback !== "function")
+            return originalMap.apply(this, arguments);
+          var source = this;
+          var wrappedCallback = function(value, index, object) {
+            try {
+              return callback.call(this, value, index, object);
+            } catch (error) {
+              limitedTrace("Array.map callback failed",
+                  "len=" + (source && source.length !== undefined ? source.length : "?") +
+                  " index=" + index +
+                  " value=" + describeValue(value) +
+                  " object=" + describeValue(object) +
+                  " error=" + stackText(error) +
+                  " caller=" + stackText(new Error("map caller")));
+              throw error;
+            }
+          };
+          try {
+            return originalMap.call(source, wrappedCallback, thisArg);
+          } catch (error) {
+            if (zdfTraceErrorWanted(error)) {
+              limitedTrace("Array.map failed",
+                  "len=" + (source && source.length !== undefined ? source.length : "?") +
+                  " first=" + describeValue(source && source[0]) +
+                  " error=" + stackText(error));
+            }
+            throw error;
+          }
+        };
+        tracedMap.__openhbbtvZdfBootTrace = true;
+        Array.prototype.map = tracedMap;
+      }
+
+      if (window.Promise && Promise.prototype && Promise.prototype.then &&
+          !Promise.prototype.then.__openhbbtvZdfBootTrace) {
+        var originalThen = Promise.prototype.then;
+        var tracedThen = function(onFulfilled, onRejected) {
+          var wrappedFulfilled = onFulfilled;
+          if (typeof onFulfilled === "function") {
+            wrappedFulfilled = function(value) {
+              try {
+                return onFulfilled.apply(this, arguments);
+              } catch (error) {
+                if (zdfTraceErrorWanted(error)) {
+                  limitedTrace("Promise onFulfilled threw",
+                      "value=" + describeValue(value) +
+                      " error=" + stackText(error) +
+                      " caller=" + stackText(new Error("promise caller")));
+                }
+                throw error;
+              }
+            };
+          }
+
+          var wrappedRejected = onRejected;
+          if (typeof onRejected === "function") {
+            wrappedRejected = function(reason) {
+              if (zdfTraceErrorWanted(reason)) {
+                limitedTrace("Promise onRejected received",
+                    "reason=" + stackText(reason) +
+                    " caller=" + stackText(new Error("promise caller")));
+              }
+              try {
+                return onRejected.apply(this, arguments);
+              } catch (error) {
+                if (zdfTraceErrorWanted(error)) {
+                  limitedTrace("Promise onRejected threw",
+                      "reason=" + stackText(reason) +
+                      " error=" + stackText(error) +
+                      " caller=" + stackText(new Error("promise caller")));
+                }
+                throw error;
+              }
+            };
+          }
+          return originalThen.call(this, wrappedFulfilled, wrappedRejected);
+        };
+        tracedThen.__openhbbtvZdfBootTrace = true;
+        Promise.prototype.then = tracedThen;
+      }
+
+      if (window.addEventListener && !window.__openhbbtvZdfBootTraceEventsInstalled) {
+        window.__openhbbtvZdfBootTraceEventsInstalled = true;
+        window.addEventListener("error", function(event) {
+          var error = event && (event.error || event.message);
+          if (zdfTraceErrorWanted(error)) {
+            limitedTrace("window error",
+                "message=" + (event && event.message) +
+                " error=" + stackText(error));
+          }
+        }, true);
+        window.addEventListener("unhandledrejection", function(event) {
+          var reason = event && event.reason;
+          if (zdfTraceErrorWanted(reason)) {
+            limitedTrace("window unhandledrejection",
+                "reason=" + stackText(reason));
+          }
+        }, true);
+      }
+    } catch (error) {
+      zdfTrace("install failed", stackText(error));
     }
   }
 
@@ -989,6 +1234,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
 
   try {
     installZdfStableObjectEntries();
+    installZdfBootTrace();
     installEarlyVideoBroadcastShim();
     installZdfConsoleFlag();
     installZdfConsoleBridge();

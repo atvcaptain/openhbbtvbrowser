@@ -506,6 +506,8 @@ void WebView::injectXmlHttpRequestScripts()
         const bool zdfInitDetailDebug = openHbbTVEnvEnabled("OPENHBBTV_ZDF_INIT_DETAIL_DEBUG", false);
         const bool apiAuditDebug = openHbbTVEnvEnabled("OPENHBBTV_API_AUDIT_DEBUG", false);
         const bool zdfStableObjectEntries = openHbbTVEnvEnabled("OPENHBBTV_ZDF_STABLE_OBJECT_ENTRIES", true);
+        const bool zdfConsoleQuery = openHbbTVEnvEnabled("OPENHBBTV_ZDF_CONSOLE_QUERY", false);
+        const bool zdfBootTrace = openHbbTVEnvEnabled("OPENHBBTV_ZDF_BOOT_TRACE", false);
         source.prepend(QStringLiteral("window.OPENHBBTV_AUTH_HTTP_DEBUG=%1;\n"
                                       "window.OPENHBBTV_HBBTV_HTTP_DEBUG=%2;\n"
                                       "window.OPENHBBTV_HBBTV_HTTP_BODY_DEBUG=%3;\n"
@@ -526,6 +528,10 @@ void WebView::injectXmlHttpRequestScripts()
                            .arg(apiAuditDebug ? QStringLiteral("true") : QStringLiteral("false")));
         source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_STABLE_OBJECT_ENTRIES=%1;\n")
                            .arg(zdfStableObjectEntries ? QStringLiteral("true") : QStringLiteral("false")));
+        source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_CONSOLE_QUERY=%1;\n")
+                           .arg(zdfConsoleQuery ? QStringLiteral("true") : QStringLiteral("false")));
+        source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_BOOT_TRACE=%1;\n")
+                           .arg(zdfBootTrace ? QStringLiteral("true") : QStringLiteral("false")));
 
         QWebEngineScript script;
         script.setName("xmlhttprequest_quirks");
@@ -543,6 +549,8 @@ void WebView::injectXmlHttpRequestScripts()
                  << "zdf boot debug" << zdfBootDebug
                  << "zdf deep probe" << zdfDeepProbe
                  << "zdf init detail debug" << zdfInitDetailDebug
+                 << "zdf console query" << zdfConsoleQuery
+                 << "zdf boot trace" << zdfBootTrace
                  << "zdf stable object entries" << zdfStableObjectEntries;
     } else {
         qWarning() << "[HbbTV] xmlhttprequest_quirks.js not found in qrc";
