@@ -48,6 +48,14 @@ static int openHbbTVEnvInt(const char *name, int defaultValue, int minValue, int
     return qBound(minValue, value, maxValue);
 }
 
+static bool openHbbTVIsZdfPage(const QUrl &candidate)
+{
+    const QString host = candidate.host().toLower();
+    return host == QStringLiteral("new-hbbtv.zdf.de") ||
+           host == QStringLiteral("hbbtv.zdf.de") ||
+           host.endsWith(QStringLiteral(".zdf.de"));
+}
+
 std::atomic_bool OpenHbbTVRequestInterceptor::s_externalPlaybackActive(false);
 
 void OpenHbbTVRequestInterceptor::setExternalPlaybackActive(bool active)
@@ -609,10 +617,7 @@ void WebView::setBroadcastInfo(const QString &json)
         qDebug() << "[OpenHbbTV] skip setBroadcastInfo JS on teletext page" << url().toString();
         return;
     }
-    const QString currentHost = url().host().toLower();
-    const bool zdfPage = currentHost == QStringLiteral("new-hbbtv.zdf.de") ||
-                         currentHost == QStringLiteral("hbbtv.zdf.de") ||
-                         currentHost.endsWith(QStringLiteral(".zdf.de"));
+    const bool zdfPage = openHbbTVIsZdfPage(url());
     if (zdfPage && !openHbbTVEnvEnabled("OPENHBBTV_ZDF_BROADCAST_INFO_JS", false)) {
         recordDiagnosticEvent(QStringLiteral("skip setBroadcastInfo JS on ZDF page"));
         qDebug() << "[OpenHbbTV] skip setBroadcastInfo JS on ZDF page" << url().toString();
@@ -783,6 +788,9 @@ void WebView::showApplicationOverlay(const QString &reason)
         || reasonLower.contains(QStringLiteral("live stream stopped"))
         || reasonLower == QStringLiteral("stream stopped");
     const bool pageLoadRefresh = reasonLower.contains(QStringLiteral("page load finished"));
+    const bool zdfBroadcastOverlayJsGuard = openHbbTVIsZdfPage(url())
+        && (reasonLower.contains(QStringLiteral("broadcast play")) || pageLoadRefresh)
+        && openHbbTVEnvEnabled("OPENHBBTV_ZDF_SKIP_BROADCAST_OVERLAY_JS", true);
     const bool wasOverlayVisible = m_streamOverlayVisible;
     const bool wasOverlayLowered = m_streamOverlayLowered;
     m_streamOverlayVisible = true;
@@ -791,7 +799,8 @@ void WebView::showApplicationOverlay(const QString &reason)
 
     qDebug() << "[OpenHbbTV] show application overlay" << reason
              << "streamReason" << streamReason << "wasVisible" << wasOverlayVisible
-             << "wasLowered" << wasOverlayLowered;
+             << "wasLowered" << wasOverlayLowered
+             << "zdfBroadcastOverlayJsGuard" << zdfBroadcastOverlayJsGuard;
 
     QWidget *top = window();
     const bool duplicateVisibleOverlay = (streamReason || postStreamReturn || pageLoadRefresh)
@@ -847,7 +856,10 @@ void WebView::showApplicationOverlay(const QString &reason)
     }
     const bool skipDuplicateOverlayJs = duplicateVisibleOverlay &&
         openHbbTVEnvEnabled("OPENHBBTV_STREAM_SKIP_DUPLICATE_OVERLAY_JS", true);
-    if (skipDuplicateOverlayJs) {
+    if (zdfBroadcastOverlayJsGuard) {
+        recordDiagnosticEvent(QStringLiteral("skip ZDF broadcast overlay JS ") + diagnosticSnippet(reason));
+        qDebug() << "[OpenHbbTV] skip ZDF broadcast overlay JS" << reason << url().toString();
+    } else if (skipDuplicateOverlayJs) {
         qDebug() << "[OpenHbbTV] skip duplicate visible overlay JS refresh" << reason;
     } else {
         runJavaScriptWithWatchdog(QStringLiteral("showApplicationOverlay ") + reason, QString::fromLatin1(
