@@ -1130,7 +1130,11 @@ void WebView::beginTeletextReturn()
     QWebEngineHistory *history = page() ? page()->history() : Q_NULLPTR;
     const QUrl backUrl = history && history->canGoBack() ? history->backItem().url() : QUrl();
     const bool forceRestart = openHbbTVEnvEnabled("OPENHBBTV_TELETEXT_RESTART_ON_ZERO", false);
-    if (!forceRestart && backUrl.isValid() && !isTeletextUrl(backUrl)) {
+    const QString returnMode = QString::fromLocal8Bit(qgetenv("OPENHBBTV_TELETEXT_RETURN_MODE")).trimmed().toLower();
+    const bool forceHistoryBack = returnMode == QStringLiteral("history");
+    const QUrl targetUrl = backUrl.isValid() && !isTeletextUrl(backUrl) ? backUrl : m_initialUrl;
+
+    if (forceHistoryBack && !forceRestart && backUrl.isValid() && !isTeletextUrl(backUrl)) {
         m_teletextReturnUrl = backUrl;
         qDebug() << "[OpenHbbTV] teletext leading zero history back"
                  << "from" << url().toString()
@@ -1145,19 +1149,28 @@ void WebView::beginTeletextReturn()
                     setUrl(m_teletextReturnUrl);
             }
         });
-    } else if (!forceRestart && m_initialUrl.isValid() && !m_initialUrl.isEmpty()) {
-        m_teletextReturnUrl = m_initialUrl;
-        qDebug() << "[OpenHbbTV] teletext leading zero force initial url"
+    } else if (!forceRestart && targetUrl.isValid() && !targetUrl.isEmpty()) {
+        m_teletextReturnUrl = targetUrl;
+        qDebug() << "[OpenHbbTV] teletext leading zero direct return"
                  << "from" << url().toString()
-                 << "to" << m_initialUrl.toString()
-                 << "backUrl" << backUrl.toString();
-        recordDiagnosticEvent(QStringLiteral("teletext leading-zero initial-url ") + diagnosticSnippet(m_initialUrl.toString()));
-        loadInitialUrlAfterTeletextReturn(0);
+                 << "to" << targetUrl.toString()
+                 << "backUrl" << backUrl.toString()
+                 << "mode" << (returnMode.isEmpty() ? QStringLiteral("direct") : returnMode);
+        recordDiagnosticEvent(QStringLiteral("teletext leading-zero direct-return ") + diagnosticSnippet(targetUrl.toString()));
+        if (page())
+            page()->triggerAction(QWebEnginePage::Stop);
+        QTimer::singleShot(80, this, [this]() {
+            if (!m_teletextReturnInProgress)
+                return;
+            qDebug() << "[OpenHbbTV] load teletext direct return url" << m_teletextReturnUrl.toString();
+            setUrl(m_teletextReturnUrl);
+        });
     } else {
         qDebug() << "[OpenHbbTV] teletext leading zero request fresh red-button restart"
                  << m_initialUrl.toString()
                  << "force" << forceRestart
-                 << "backUrl" << backUrl.toString();
+                 << "backUrl" << backUrl.toString()
+                 << "mode" << returnMode;
         recordDiagnosticEvent(QStringLiteral("teletext leading-zero restart ") + diagnosticSnippet(m_initialUrl.toString()));
         emit hbbtvCommand(CommandClient::CommandRestartApplication, QStringLiteral("redbutton"));
     }
