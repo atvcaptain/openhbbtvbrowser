@@ -54,6 +54,10 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     return window.OPENHBBTV_ZDF_SAFE_INIT_FETCH === true;
   }
 
+  function zdfDirectInitRequestEnabled() {
+    return window.OPENHBBTV_ZDF_DIRECT_INIT_REQUEST === true;
+  }
+
   function zdfDeepProbeEnabled() {
     return window.OPENHBBTV_ZDF_DEEP_PROBE === true;
   }
@@ -1179,6 +1183,145 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     setTimeout(wrapFetch, 2000);
   }
 
+  function appendZdfRequestMode(url, requestInit) {
+    try {
+      var mode = requestInit && requestInit.appMode;
+      if (!mode)
+        return url;
+      var separator = String(url || "").indexOf("?") >= 0 ? "&" : "?";
+      return String(url || "") + separator + "mode=" + encodeURIComponent(mode);
+    } catch (ignore) {
+      return url;
+    }
+  }
+
+  function directZdfInitRequest(url, requestInit) {
+    return new Promise(function(resolve, reject) {
+      var finalUrl = appendZdfRequestMode(url, requestInit);
+      try {
+        zdfTrace("direct init xhr begin", "url=" + finalUrl);
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", finalUrl, true);
+        try {
+          xhr.setRequestHeader("Accept-Language", "de");
+          xhr.setRequestHeader("Content-Type", "application/json");
+          var headers = requestInit && requestInit.headers;
+          if (headers && typeof headers === "object") {
+            var keys = Object.keys(headers);
+            for (var i = 0; i < keys.length; i++)
+              xhr.setRequestHeader(keys[i], headers[keys[i]]);
+          }
+        } catch (ignoreHeaders) {}
+
+        xhr.onload = function() {
+          try {
+            var body = String(xhr.responseText || "");
+            zdfTrace("direct init xhr load",
+                "url=" + finalUrl +
+                " status=" + xhr.status +
+                " len=" + body.length +
+                summarizeJson(body));
+            if (xhr.status < 200 || xhr.status >= 300) {
+              reject(new Error("ZDF direct init HTTP " + xhr.status));
+              return;
+            }
+            var value = JSON.parse(body);
+            if (value && value.errors && value.errors.length) {
+              reject(new Error("ZDF direct init returned errors"));
+              return;
+            }
+            if (!value || !value.data || typeof value.data !== "object") {
+              reject(new Error("ZDF direct init missing data"));
+              return;
+            }
+            zdfTrace("direct init data ready",
+                "keys=" + Object.keys(value.data).slice(0, 24).join("|"));
+            resolve(value.data);
+          } catch (error) {
+            zdfTrace("direct init parse failed", stackText(error));
+            reject(error);
+          }
+        };
+        xhr.onerror = function() {
+          reject(new Error("ZDF direct init XHR error"));
+        };
+        xhr.onabort = function() {
+          reject(new Error("ZDF direct init XHR abort"));
+        };
+        xhr.ontimeout = function() {
+          reject(new Error("ZDF direct init XHR timeout"));
+        };
+        xhr.send();
+      } catch (error) {
+        zdfTrace("direct init xhr threw", stackText(error));
+        reject(error);
+      }
+    });
+  }
+
+  function patchZdfAlRequestExports(exportsObject) {
+    try {
+      if (!exportsObject || exportsObject.__openhbbtvZdfDirectInitRequest ||
+          typeof exportsObject.getRequest !== "function")
+        return;
+      var originalGetRequest = exportsObject.getRequest;
+      exportsObject.getRequest = function(url, requestInit, isDebug) {
+        if (isZdfInitUrl(url)) {
+          zdfTrace("direct init getRequest", "url=" + url);
+          return directZdfInitRequest(url, requestInit);
+        }
+        return originalGetRequest.apply(this, arguments);
+      };
+      exportsObject.__openhbbtvZdfDirectInitRequest = true;
+      zdfTrace("direct init exports patched", "getRequest=" + describeValue(originalGetRequest));
+    } catch (error) {
+      zdfTrace("direct init exports patch failed", stackText(error));
+    }
+  }
+
+  function installZdfDirectInitRequest() {
+    if (!zdfDirectInitRequestEnabled() || !isZdfPage() ||
+        window.__openhbbtvZdfDirectInitRequestInstalled)
+      return;
+
+    try {
+      window.__openhbbtvZdfDirectInitRequestInstalled = true;
+      var globalObject = typeof self !== "undefined" ? self : window;
+      var chunkName = "webpackChunk_tv_media_library_zdf_mediathek";
+      var chunkQueue = globalObject[chunkName] = globalObject[chunkName] || [];
+      if (chunkQueue.__openhbbtvZdfDirectInitRequestQueued)
+        return;
+      chunkQueue.__openhbbtvZdfDirectInitRequestQueued = true;
+      chunkQueue.push([[987654], {}, function(requireFn) {
+        try {
+          zdfTrace("direct init webpack hook",
+              "hasModules=" + !!(requireFn && requireFn.m));
+          if (!requireFn || !requireFn.m)
+            return;
+          var moduleId = 4467;
+          var originalFactory = requireFn.m[moduleId];
+          if (typeof originalFactory !== "function") {
+            zdfTrace("direct init module missing", "id=" + moduleId);
+            return;
+          }
+          if (originalFactory.__openhbbtvZdfDirectInitRequestFactory)
+            return;
+          requireFn.m[moduleId] = function(module, exportsObject, localRequire) {
+            originalFactory.call(this, module, exportsObject, localRequire);
+            patchZdfAlRequestExports(exportsObject);
+          };
+          requireFn.m[moduleId].__openhbbtvZdfDirectInitRequestFactory = true;
+          zdfTrace("direct init module factory patched", "id=" + moduleId);
+        } catch (error) {
+          zdfTrace("direct init webpack hook failed", stackText(error));
+        }
+      }]);
+      zdfTrace("direct init webpack hook queued", chunkName);
+    } catch (error) {
+      zdfTrace("direct init install failed", stackText(error));
+    }
+  }
+
   function stringifyConsoleArg(arg) {
     try {
       if (arg instanceof Error)
@@ -1344,6 +1487,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     installZdfStableObjectEntries();
     installZdfBootTrace();
     installZdfSafeInitFetch();
+    installZdfDirectInitRequest();
     installEarlyVideoBroadcastShim();
     installZdfConsoleFlag();
     installZdfConsoleBridge();
