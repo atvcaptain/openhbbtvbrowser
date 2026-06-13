@@ -465,6 +465,8 @@ void WebView::injectXmlHttpRequestScripts()
     if (quirks.open(QIODevice::ReadOnly)) {
         QString source = QString::fromUtf8(quirks.readAll());
         quirks.close();
+        const bool authHttpDebug = openHbbTVEnvEnabled("OPENHBBTV_AUTH_HTTP_DEBUG", true);
+        source.prepend(QStringLiteral("window.OPENHBBTV_AUTH_HTTP_DEBUG=%1;\n").arg(authHttpDebug ? QStringLiteral("true") : QStringLiteral("false")));
 
         QWebEngineScript script;
         script.setName("xmlhttprequest_quirks");
@@ -475,6 +477,7 @@ void WebView::injectXmlHttpRequestScripts()
         page()->scripts().insert(script);
 
         qDebug() << "[HbbTV] xmlhttprequest_quirks injected via QWebEngineScript";
+        qDebug() << "[OpenHbbTV] auth HTTP debug" << authHttpDebug;
     } else {
         qWarning() << "[HbbTV] xmlhttprequest_quirks.js not found in qrc";
     }
