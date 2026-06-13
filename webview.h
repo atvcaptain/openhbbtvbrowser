@@ -132,8 +132,6 @@ private:
     void repaintOverlaySurface(const QString &reason);
     void retryOverlayRepaint(const QString &reason, int delayMs);
     void retryStreamOverlayVisible(const QString &reason, int delayMs);
-    void hideApplicationDocumentForPlayback(const QString &reason);
-    void restoreApplicationDocumentForOverlay(const QString &reason);
     void syncDeferredStreamStateToApplication(const QString &reason);
     void requestRestartApplicationOnce(const QString &reason);
     bool streamRendererFreezeEnabled() const;
@@ -157,13 +155,8 @@ private:
     QString m_lastBroadcastInfo;
     int m_streamState;
     int m_streamError;
-    qint64 m_lastStreamPositionMs;
-    qint64 m_lastStreamDurationMs;
-    bool m_hasStreamPosition;
     bool m_streamOverlayVisible;
     bool m_streamOverlayLowered;
-    bool m_streamNativeLowerPending;
-    bool m_streamDocumentHiddenForPlayback;
     bool m_silentPlayingStatePending;
     bool m_streamRendererFrozen;
     bool m_streamViewHiddenForPlayback;

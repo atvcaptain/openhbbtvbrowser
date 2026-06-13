@@ -115,13 +115,8 @@ WebView::WebView(QWidget *parent)
     : QWebEngineView(parent)
     , m_streamState(0)
     , m_streamError(-1)
-    , m_lastStreamPositionMs(-1)
-    , m_lastStreamDurationMs(-1)
-    , m_hasStreamPosition(false)
     , m_streamOverlayVisible(true)
     , m_streamOverlayLowered(false)
-    , m_streamNativeLowerPending(false)
-    , m_streamDocumentHiddenForPlayback(false)
     , m_silentPlayingStatePending(false)
     , m_streamRendererFrozen(false)
     , m_streamViewHiddenForPlayback(false)
@@ -564,7 +559,6 @@ void WebView::setBroadcastInfo(const QString &json)
         "  try {"
         "    var info = JSON.parse(raw);"
         "    window.HBBTV_POLYFILL_NS.broadcastInfo = info;"
-        "    window.HBBTV_POLYFILL_NS.broadcastInfoReceivedAt = Date.now ? Date.now() : (new Date()).getTime();"
         "    if (info.channel) {"
         "      window.HBBTV_POLYFILL_NS.currentChannel = info.channel;"
         "    }"
@@ -699,9 +693,7 @@ void WebView::showApplicationOverlay(const QString &reason)
     const bool pageLoadRefresh = reasonLower.contains(QStringLiteral("page load finished"));
     const bool wasOverlayVisible = m_streamOverlayVisible;
     const bool wasOverlayLowered = m_streamOverlayLowered;
-    const bool wasDocumentHidden = m_streamDocumentHiddenForPlayback;
     m_streamOverlayVisible = true;
-    m_streamNativeLowerPending = false;
     if (isStreamActive())
         m_streamOverlayHoldUntilMs = QDateTime::currentMSecsSinceEpoch() + 2000;
 
@@ -761,134 +753,29 @@ void WebView::showApplicationOverlay(const QString &reason)
         retryOverlayRepaint(reason, 120);
         retryOverlayRepaint(reason, 450);
     }
-    const bool skipDuplicateOverlayJs = duplicateVisibleOverlay && !wasDocumentHidden &&
+    const bool skipDuplicateOverlayJs = duplicateVisibleOverlay &&
         openHbbTVEnvEnabled("OPENHBBTV_STREAM_SKIP_DUPLICATE_OVERLAY_JS", true);
     if (skipDuplicateOverlayJs) {
         qDebug() << "[OpenHbbTV] skip duplicate visible overlay JS refresh" << reason;
     } else {
-        restoreApplicationDocumentForOverlay(reason);
+        runJavaScriptWithWatchdog(QStringLiteral("showApplicationOverlay ") + reason, QString::fromLatin1(
+            "(function() {"
+            "  try { if (document.documentElement) document.documentElement.style.visibility = 'visible'; } catch (e) {}"
+            "  try { if (document.body) { document.body.style.visibility = 'visible'; document.body.style.display = ''; document.body.style.opacity = '1'; if (document.body.focus) document.body.focus(); } } catch (e) {}"
+            "  try {"
+            "    if (window.oipfApplicationManager && window.oipfApplicationManager.getOwnerApplication) {"
+            "      var app = window.oipfApplicationManager.getOwnerApplication(document);"
+            "      if (app && app.show) app.show();"
+            "    }"
+            "  } catch (e) {}"
+            "  try { window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('focus')); } catch (e) {}"
+            "})();"));
     }
     if (m_silentPlayingStatePending && m_streamState == 1) {
         QTimer::singleShot(180, this, [this, reason]() {
             syncDeferredStreamStateToApplication(reason);
         });
     }
-    if (m_streamState == 1 && m_streamOverlayVisible && m_hasStreamPosition) {
-        if (openHbbTVEnvEnabled("OPENHBBTV_STREAM_SKIP_VISIBLE_POSITION_JS", true)) {
-            qDebug() << "[OpenHbbTV] skip deferred visible stream position JS; E2 owns external playback"
-                     << reason << m_lastStreamPositionMs << m_lastStreamDurationMs;
-            return;
-        }
-        QTimer::singleShot(220, this, [this, reason]() {
-            if (m_streamState != 1 || !m_streamOverlayVisible || !m_hasStreamPosition)
-                return;
-            qDebug() << "[OpenHbbTV] sync deferred stream position to visible overlay" << reason
-                     << m_lastStreamPositionMs << m_lastStreamDurationMs;
-            setStreamPosition(m_lastStreamPositionMs, m_lastStreamDurationMs);
-        });
-    }
-}
-
-void WebView::hideApplicationDocumentForPlayback(const QString &reason)
-{
-    if (!openHbbTVEnvEnabled("OPENHBBTV_STREAM_HIDE_DOCUMENT_ON_FULLSCREEN", true)) {
-        qDebug() << "[OpenHbbTV] stream document hide disabled" << reason;
-        return;
-    }
-    if (openHbbTVEnvEnabled("OPENHBBTV_STREAM_SKIP_DOCUMENT_HIDE_JS", true)) {
-        qDebug() << "[OpenHbbTV] skip stream document hide JS; E2 owns external playback" << reason
-                 << "wasHidden" << m_streamDocumentHiddenForPlayback;
-        return;
-    }
-    if (m_streamDocumentHiddenForPlayback) {
-        qDebug() << "[OpenHbbTV] skip duplicate stream document hide" << reason;
-        return;
-    }
-
-    m_streamDocumentHiddenForPlayback = true;
-    QString hideMode = QString::fromLocal8Bit(qgetenv("OPENHBBTV_STREAM_HIDE_DOCUMENT_MODE")).trimmed().toLower();
-    if (hideMode.isEmpty())
-        hideMode = QStringLiteral("opacity");
-    const bool useVisibility = hideMode == QStringLiteral("visibility") ||
-        hideMode == QStringLiteral("full");
-    const bool callApplicationHide = openHbbTVEnvEnabled("OPENHBBTV_STREAM_CALL_APP_HIDE_ON_FULLSCREEN", false);
-    qDebug() << "[OpenHbbTV] hide application document for external playback" << reason
-             << "mode" << hideMode << "appHide" << callApplicationHide;
-    runJavaScriptWithWatchdog(QStringLiteral("hideApplicationDocumentForPlayback ") + reason, QString::fromLatin1(
-        "(function() {"
-        "  try {"
-        "    var useVisibility = %1;"
-        "    var callApplicationHide = %2;"
-        "    function snap(el) {"
-        "      if (!el) return null;"
-        "      return {"
-        "        visibility: el.style.visibility || '',"
-        "        opacity: el.style.opacity || '',"
-        "        pointerEvents: el.style.pointerEvents || '',"
-        "        background: el.style.background || '',"
-        "        backgroundColor: el.style.backgroundColor || ''"
-        "      };"
-        "    }"
-        "    if (!window.__openhbbtvOverlayHiddenState) {"
-        "      window.__openhbbtvOverlayHiddenState = {"
-        "        html: snap(document.documentElement),"
-        "        body: snap(document.body)"
-        "      };"
-        "    }"
-        "    function hide(el) {"
-        "      if (!el) return;"
-        "      if (useVisibility) el.style.visibility = 'hidden';"
-        "      el.style.opacity = '0';"
-        "      el.style.pointerEvents = 'none';"
-        "      el.style.background = 'transparent';"
-        "      el.style.backgroundColor = 'transparent';"
-        "    }"
-        "    hide(document.documentElement);"
-        "    hide(document.body);"
-        "    if (callApplicationHide && window.oipfApplicationManager && window.oipfApplicationManager.getOwnerApplication) {"
-        "      var app = window.oipfApplicationManager.getOwnerApplication(document);"
-        "      if (app && app.hide) app.hide();"
-        "    }"
-        "  } catch (e) {}"
-        "})();")
-            .arg(useVisibility ? QStringLiteral("true") : QStringLiteral("false"))
-            .arg(callApplicationHide ? QStringLiteral("true") : QStringLiteral("false")));
-}
-
-void WebView::restoreApplicationDocumentForOverlay(const QString &reason)
-{
-    const bool wasHidden = m_streamDocumentHiddenForPlayback;
-    m_streamDocumentHiddenForPlayback = false;
-    qDebug() << "[OpenHbbTV] restore application document for overlay" << reason
-             << "wasHidden" << wasHidden;
-    runJavaScriptWithWatchdog(QStringLiteral("showApplicationOverlay ") + reason, QString::fromLatin1(
-        "(function() {"
-        "  try {"
-        "    var state = window.__openhbbtvOverlayHiddenState || null;"
-        "    function apply(el, snap) {"
-        "      if (!el) return;"
-        "      if (snap) {"
-        "        el.style.visibility = snap.visibility || '';"
-        "        el.style.opacity = snap.opacity || '';"
-        "        el.style.pointerEvents = snap.pointerEvents || '';"
-        "        el.style.background = snap.background || '';"
-        "        el.style.backgroundColor = snap.backgroundColor || '';"
-        "      }"
-        "    }"
-        "    apply(document.documentElement, state && state.html);"
-        "    apply(document.body, state && state.body);"
-        "    window.__openhbbtvOverlayHiddenState = null;"
-        "  } catch (e) {}"
-        "  try { if (document.documentElement) document.documentElement.style.visibility = 'visible'; } catch (e) {}"
-        "  try { if (document.body) { document.body.style.visibility = 'visible'; document.body.style.display = ''; document.body.style.opacity = '1'; document.body.style.pointerEvents = ''; if (document.body.focus) document.body.focus(); } } catch (e) {}"
-        "  try {"
-        "    if (window.oipfApplicationManager && window.oipfApplicationManager.getOwnerApplication) {"
-        "      var app = window.oipfApplicationManager.getOwnerApplication(document);"
-        "      if (app && app.show) app.show();"
-        "    }"
-        "  } catch (e) {}"
-        "  try { window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('focus')); } catch (e) {}"
-        "})();"));
 }
 
 void WebView::syncDeferredStreamStateToApplication(const QString &reason)
@@ -938,17 +825,14 @@ void WebView::hideApplicationOverlay(const QString &reason)
         qDebug() << "[OpenHbbTV] skip auto hide while stream overlay is explicitly visible" << reason;
         return;
     }
-    if (reasonLower.contains(QStringLiteral("auto hide")) && !m_streamOverlayVisible
-            && (m_streamOverlayLowered || m_streamNativeLowerPending)) {
-        qDebug() << "[OpenHbbTV] skip duplicate auto hide after browser already hidden/parked" << reason
-                 << "pendingLower" << m_streamNativeLowerPending;
+    if (reasonLower.contains(QStringLiteral("auto hide")) && !m_streamOverlayVisible && m_streamOverlayLowered) {
+        qDebug() << "[OpenHbbTV] skip duplicate auto hide after browser already hidden/parked" << reason;
         return;
     }
     m_streamOverlayVisible = false;
     if (!reasonLower.contains(QStringLiteral("auto hide")))
         m_streamOverlayHoldUntilMs = 0;
     qDebug() << "[OpenHbbTV] hide application overlay" << reason;
-    hideApplicationDocumentForPlayback(reason);
     QWidget *top = window();
     if (top) {
         if (!m_streamOverlayGeometryValid && top->geometry().isValid()) {
@@ -974,47 +858,8 @@ void WebView::hideApplicationOverlay(const QString &reason)
             || hideMode == QStringLiteral("tiny")
             || hideMode == QStringLiteral("move")
             || hideMode == QStringLiteral("safe");
-        const int deferLowerMs = openHbbTVEnvInt("OPENHBBTV_STREAM_DEFER_NATIVE_LOWER_MS", 650, 0, 5000);
-        const bool deferredLower = preStreamHide
-            && deferLowerMs > 0
-            && !nativeHide
-            && !keepMode
-            && !parkMode
-            && !reasonLower.contains(QStringLiteral("deferred"))
-            && !m_streamNativeLowerPending;
 
-        if (deferredLower) {
-            QPointer<QWidget> topPtr(top);
-            m_streamNativeLowerPending = true;
-            qDebug() << "[OpenHbbTV] defer browser native lower for stream" << reason
-                     << "delay" << deferLowerMs << top->geometry()
-                     << "visible" << top->isVisible();
-            QTimer::singleShot(deferLowerMs, this, [this, topPtr, reason, deferLowerMs]() {
-                if (!topPtr || m_streamState != 1 || m_streamOverlayVisible) {
-                    qDebug() << "[OpenHbbTV] skip deferred browser native lower" << reason
-                             << "delay" << deferLowerMs
-                             << "top" << static_cast<bool>(topPtr)
-                             << "state" << m_streamState
-                             << "overlayVisible" << m_streamOverlayVisible;
-                    m_streamNativeLowerPending = false;
-                    return;
-                }
-                if (m_streamOverlayGeometryValid)
-                    topPtr->setGeometry(m_streamOverlaySavedGeometry);
-                if (!topPtr->isVisible()) {
-                    topPtr->showFullScreen();
-                    qDebug() << "[OpenHbbTV] recreate visible browser surface before deferred lower"
-                             << reason << topPtr->geometry();
-                }
-                topPtr->lower();
-                m_streamOverlayLowered = true;
-                m_streamNativeLowerPending = false;
-                qDebug() << "[OpenHbbTV] deferred lower browser window for stream without native hide"
-                         << reason << "delay" << deferLowerMs
-                         << topPtr->geometry() << "visible" << topPtr->isVisible();
-                QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
-            });
-        } else if (nativeHide) {
+        if (nativeHide) {
             // Diagnostic opt-in. On Vu+/eglfs_libvupl with alpha enabled,
             // top-level hide maps to VUGLES_SetVisible(false) and can crash the
             // WebEngine renderer. The launcher defaults to lower/transparent.
@@ -1059,10 +904,8 @@ void WebView::hideApplicationOverlay(const QString &reason)
             qDebug() << "[OpenHbbTV] lower browser window for stream without native hide (vod-style)" << reason
                      << top->geometry() << "visible" << top->isVisible();
         }
-        if (!deferredLower) {
-            m_streamOverlayLowered = true;
-            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
-        }
+        m_streamOverlayLowered = true;
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
     }
 }
 
@@ -1104,12 +947,6 @@ void WebView::setStreamState(int state, int error)
     OpenHbbTVRequestInterceptor::setExternalPlaybackActive(state == 1 || state == 2);
     if (state != 1)
         setStreamRendererActive(true, QStringLiteral("stream state not playing"));
-    if (state == 0) {
-        m_hasStreamPosition = false;
-        m_lastStreamPositionMs = -1;
-        m_lastStreamDurationMs = -1;
-        m_streamNativeLowerPending = false;
-    }
     const QString silentPlayingValue = QString::fromLocal8Bit(qgetenv("OPENHBBTV_STREAM_SILENT_PLAYING_STATE")).trimmed().toLower();
     const bool silentPlayingState = state == 1 && !m_streamOverlayVisible &&
         (silentPlayingValue == QStringLiteral("1") ||
@@ -1126,12 +963,9 @@ void WebView::setStreamState(int state, int error)
         m_silentPlayingStatePending = false;
     const bool skipVisibleStopStateJs = state == 0 && wasOverlayVisible &&
         openHbbTVEnvEnabled("OPENHBBTV_STREAM_SKIP_VISIBLE_STOP_STATE_JS", true);
-    const bool skipHiddenPlayingStateJs = state == 1 && !m_streamOverlayVisible &&
-        openHbbTVEnvEnabled("OPENHBBTV_STREAM_SKIP_HIDDEN_PLAYING_STATE_JS", true);
     qDebug() << "[OpenHbbTV] setStreamState" << state << error
              << "overlayVisible" << m_streamOverlayVisible
              << "silentPlayingEvent" << silentPlayingState
-             << "skipHiddenPlayingStateJs" << skipHiddenPlayingStateJs
              << "skipVisibleStopStateJs" << skipVisibleStopStateJs;
     QString s = QString::fromLatin1("(function() {"
                                     "  window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};"
@@ -1141,9 +975,7 @@ void WebView::setStreamState(int state, int error)
                                     "    window.HBBTV_POLYFILL_NS.pendingStreamState = [%1, %2%3];"
                                     "  }"
                                     "})();").arg(state).arg(error).arg(streamStateOptions);
-    if (skipHiddenPlayingStateJs) {
-        qDebug() << "[OpenHbbTV] skip hidden stream playing state JS; E2 owns external playback";
-    } else if (skipVisibleStopStateJs) {
+    if (skipVisibleStopStateJs) {
         qDebug() << "[OpenHbbTV] skip visible stream stop state JS; overlay already visible";
     } else {
         runJavaScriptWithWatchdog(QStringLiteral("setStreamState %1,%2").arg(state).arg(error), s);
@@ -1174,27 +1006,10 @@ void WebView::setStreamState(int state, int error)
 
 void WebView::setStreamPosition(qint64 positionMs, qint64 durationMs)
 {
-    m_lastStreamPositionMs = positionMs;
-    m_lastStreamDurationMs = durationMs;
-    m_hasStreamPosition = positionMs >= 0 || durationMs >= 0;
-    const bool skipHiddenPositionJs = m_streamState == 1 && !m_streamOverlayVisible &&
-        openHbbTVEnvEnabled("OPENHBBTV_STREAM_SKIP_HIDDEN_POSITION_JS", true);
-    const bool skipVisiblePositionJs = m_streamState == 1 && m_streamOverlayVisible &&
-        openHbbTVEnvEnabled("OPENHBBTV_STREAM_SKIP_VISIBLE_POSITION_JS", true);
     qDebug() << "[OpenHbbTV] setStreamPosition" << positionMs << durationMs
-              << "streamState" << m_streamState
-              << "overlayVisible" << m_streamOverlayVisible
-              << "skipHiddenPositionJs" << skipHiddenPositionJs
-              << "skipVisiblePositionJs" << skipVisiblePositionJs;
+             << "streamState" << m_streamState
+             << "overlayVisible" << m_streamOverlayVisible;
     recordDiagnosticEvent(QStringLiteral("setStreamPosition %1,%2").arg(positionMs).arg(durationMs));
-    if (skipHiddenPositionJs) {
-        qDebug() << "[OpenHbbTV] skip hidden stream position JS; E2 owns external playback";
-        return;
-    }
-    if (skipVisiblePositionJs) {
-        qDebug() << "[OpenHbbTV] skip visible stream position JS; E2 owns external playback";
-        return;
-    }
     QString s = QString::fromLatin1("(function() {"
                                     "  window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};"
                                     "  if (typeof window.HBBTV_POLYFILL_NS.setStreamPosition === 'function') {"
