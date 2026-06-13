@@ -796,10 +796,19 @@ void WebView::hideApplicationDocumentForPlayback(const QString &reason)
     }
 
     m_streamDocumentHiddenForPlayback = true;
-    qDebug() << "[OpenHbbTV] hide application document for external playback" << reason;
+    QString hideMode = QString::fromLocal8Bit(qgetenv("OPENHBBTV_STREAM_HIDE_DOCUMENT_MODE")).trimmed().toLower();
+    if (hideMode.isEmpty())
+        hideMode = QStringLiteral("opacity");
+    const bool useVisibility = hideMode == QStringLiteral("visibility") ||
+        hideMode == QStringLiteral("full");
+    const bool callApplicationHide = openHbbTVEnvEnabled("OPENHBBTV_STREAM_CALL_APP_HIDE_ON_FULLSCREEN", false);
+    qDebug() << "[OpenHbbTV] hide application document for external playback" << reason
+             << "mode" << hideMode << "appHide" << callApplicationHide;
     runJavaScriptWithWatchdog(QStringLiteral("hideApplicationDocumentForPlayback ") + reason, QString::fromLatin1(
         "(function() {"
         "  try {"
+        "    var useVisibility = %1;"
+        "    var callApplicationHide = %2;"
         "    function snap(el) {"
         "      if (!el) return null;"
         "      return {"
@@ -818,7 +827,7 @@ void WebView::hideApplicationDocumentForPlayback(const QString &reason)
         "    }"
         "    function hide(el) {"
         "      if (!el) return;"
-        "      el.style.visibility = 'hidden';"
+        "      if (useVisibility) el.style.visibility = 'hidden';"
         "      el.style.opacity = '0';"
         "      el.style.pointerEvents = 'none';"
         "      el.style.background = 'transparent';"
@@ -826,12 +835,14 @@ void WebView::hideApplicationDocumentForPlayback(const QString &reason)
         "    }"
         "    hide(document.documentElement);"
         "    hide(document.body);"
-        "    if (window.oipfApplicationManager && window.oipfApplicationManager.getOwnerApplication) {"
+        "    if (callApplicationHide && window.oipfApplicationManager && window.oipfApplicationManager.getOwnerApplication) {"
         "      var app = window.oipfApplicationManager.getOwnerApplication(document);"
         "      if (app && app.hide) app.hide();"
         "    }"
         "  } catch (e) {}"
-        "})();"));
+        "})();")
+            .arg(useVisibility ? QStringLiteral("true") : QStringLiteral("false"))
+            .arg(callApplicationHide ? QStringLiteral("true") : QStringLiteral("false")));
 }
 
 void WebView::restoreApplicationDocumentForOverlay(const QString &reason)
