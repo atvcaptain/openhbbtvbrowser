@@ -495,6 +495,7 @@ void WebView::injectXmlHttpRequestScripts()
         const bool authHttpDebug = openHbbTVEnvEnabled("OPENHBBTV_AUTH_HTTP_DEBUG", false);
         const bool hbbtvHttpDebug = openHbbTVEnvEnabled("OPENHBBTV_HBBTV_HTTP_DEBUG", false);
         const bool hbbtvHttpBodyDebug = openHbbTVEnvEnabled("OPENHBBTV_HBBTV_HTTP_BODY_DEBUG", false);
+        const bool jsHttpWrapDebug = openHbbTVEnvEnabled("OPENHBBTV_JS_HTTP_WRAP_DEBUG", false);
         const bool zdfConsoleDebug = openHbbTVEnvEnabled("OPENHBBTV_ZDF_CONSOLE_DEBUG", false);
         const bool zdfBootDebug = openHbbTVEnvEnabled("OPENHBBTV_ZDF_BOOT_DEBUG", false);
         const bool zdfDeepProbe = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DEEP_PROBE", false);
@@ -503,14 +504,16 @@ void WebView::injectXmlHttpRequestScripts()
         source.prepend(QStringLiteral("window.OPENHBBTV_AUTH_HTTP_DEBUG=%1;\n"
                                       "window.OPENHBBTV_HBBTV_HTTP_DEBUG=%2;\n"
                                       "window.OPENHBBTV_HBBTV_HTTP_BODY_DEBUG=%3;\n"
-                                      "window.OPENHBBTV_ZDF_CONSOLE_DEBUG=%4;\n"
-                                      "window.OPENHBBTV_ZDF_BOOT_DEBUG=%5;\n"
-                                      "window.OPENHBBTV_ZDF_DEEP_PROBE=%6;\n"
-                                      "window.OPENHBBTV_ZDF_INIT_DETAIL_DEBUG=%7;\n"
-                                      "window.OPENHBBTV_API_AUDIT_DEBUG=%8;\n")
+                                      "window.OPENHBBTV_JS_HTTP_WRAP_DEBUG=%4;\n"
+                                      "window.OPENHBBTV_ZDF_CONSOLE_DEBUG=%5;\n"
+                                      "window.OPENHBBTV_ZDF_BOOT_DEBUG=%6;\n"
+                                      "window.OPENHBBTV_ZDF_DEEP_PROBE=%7;\n"
+                                      "window.OPENHBBTV_ZDF_INIT_DETAIL_DEBUG=%8;\n"
+                                      "window.OPENHBBTV_API_AUDIT_DEBUG=%9;\n")
                            .arg(authHttpDebug ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(hbbtvHttpDebug ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(hbbtvHttpBodyDebug ? QStringLiteral("true") : QStringLiteral("false"))
+                           .arg(jsHttpWrapDebug ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(zdfConsoleDebug ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(zdfBootDebug ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(zdfDeepProbe ? QStringLiteral("true") : QStringLiteral("false"))
@@ -528,6 +531,7 @@ void WebView::injectXmlHttpRequestScripts()
         qDebug() << "[HbbTV] xmlhttprequest_quirks injected via QWebEngineScript";
         qDebug() << "[OpenHbbTV] auth HTTP debug" << authHttpDebug << "hbbtv HTTP debug" << hbbtvHttpDebug
                  << "hbbtv HTTP body debug" << hbbtvHttpBodyDebug
+                 << "js HTTP wrap debug" << jsHttpWrapDebug
                  << "zdf console debug" << zdfConsoleDebug
                  << "zdf boot debug" << zdfBootDebug
                  << "zdf deep probe" << zdfDeepProbe
@@ -579,6 +583,15 @@ void WebView::setBroadcastInfo(const QString &json)
     if (isTeletextUrl() && !openHbbTVEnvEnabled("OPENHBBTV_TELETEXT_BROADCAST_INFO", true)) {
         recordDiagnosticEvent(QStringLiteral("skip setBroadcastInfo JS on teletext page"));
         qDebug() << "[OpenHbbTV] skip setBroadcastInfo JS on teletext page" << url().toString();
+        return;
+    }
+    const QString currentHost = url().host().toLower();
+    const bool zdfPage = currentHost == QStringLiteral("new-hbbtv.zdf.de") ||
+                         currentHost == QStringLiteral("hbbtv.zdf.de") ||
+                         currentHost.endsWith(QStringLiteral(".zdf.de"));
+    if (zdfPage && !openHbbTVEnvEnabled("OPENHBBTV_ZDF_BROADCAST_INFO_JS", false)) {
+        recordDiagnosticEvent(QStringLiteral("skip setBroadcastInfo JS on ZDF page"));
+        qDebug() << "[OpenHbbTV] skip setBroadcastInfo JS on ZDF page" << url().toString();
         return;
     }
     const QByteArray encoded = json.toUtf8().toBase64();

@@ -50,6 +50,14 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     return zdfDeepProbeEnabled() || window.OPENHBBTV_ZDF_INIT_DETAIL_DEBUG === true;
   }
 
+  function jsHttpWrapDebugEnabled() {
+    return window.OPENHBBTV_JS_HTTP_WRAP_DEBUG === true ||
+           authDebugEnabled() ||
+           hbbtvBodyDebugEnabled() ||
+           zdfDeepProbeEnabled() ||
+           zdfInitDetailDebugEnabled();
+  }
+
   function isZdfPage() {
     try {
       var host = String((window.location && window.location.hostname) || "").toLowerCase();
@@ -925,6 +933,8 @@ window.cefXmlHttpRequestQuirk = function(uri) {
   }
 
   try {
+    if (!jsHttpWrapDebugEnabled())
+      throw new Error("disabled");
     var originalOpen = XMLHttpRequest.prototype.open;
     var originalSend = XMLHttpRequest.prototype.send;
     XMLHttpRequest.prototype.open = function(method, url) {
@@ -959,12 +969,14 @@ window.cefXmlHttpRequestQuirk = function(uri) {
       return originalSend.apply(this, arguments);
     };
   } catch (error) {
-    log("AUTHHTTP", "XHR debug install failed " + error);
-    log("HBBTVHTTP", "XHR debug install failed " + error);
+    if (jsHttpWrapDebugEnabled()) {
+      log("AUTHHTTP", "XHR debug install failed " + error);
+      log("HBBTVHTTP", "XHR debug install failed " + error);
+    }
   }
 
   try {
-    if (typeof window.fetch === "function" && !window.fetch.__openhbbtvAuthWrapped) {
+    if (jsHttpWrapDebugEnabled() && typeof window.fetch === "function" && !window.fetch.__openhbbtvAuthWrapped) {
       var originalFetch = window.fetch;
       var wrappedFetch = function(input, init) {
         var url = "";
