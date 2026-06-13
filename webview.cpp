@@ -559,6 +559,7 @@ void WebView::setBroadcastInfo(const QString &json)
         "  try {"
         "    var info = JSON.parse(raw);"
         "    window.HBBTV_POLYFILL_NS.broadcastInfo = info;"
+        "    window.HBBTV_POLYFILL_NS.broadcastInfoReceivedAt = Date.now ? Date.now() : (new Date()).getTime();"
         "    if (info.channel) {"
         "      window.HBBTV_POLYFILL_NS.currentChannel = info.channel;"
         "    }"
