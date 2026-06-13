@@ -160,6 +160,7 @@ private:
     bool m_hasStreamPosition;
     bool m_streamOverlayVisible;
     bool m_streamOverlayLowered;
+    bool m_streamNativeLowerPending;
     bool m_silentPlayingStatePending;
     bool m_streamRendererFrozen;
     bool m_streamViewHiddenForPlayback;

@@ -120,6 +120,7 @@ WebView::WebView(QWidget *parent)
     , m_hasStreamPosition(false)
     , m_streamOverlayVisible(true)
     , m_streamOverlayLowered(false)
+    , m_streamNativeLowerPending(false)
     , m_silentPlayingStatePending(false)
     , m_streamRendererFrozen(false)
     , m_streamViewHiddenForPlayback(false)
@@ -698,6 +699,7 @@ void WebView::showApplicationOverlay(const QString &reason)
     const bool wasOverlayVisible = m_streamOverlayVisible;
     const bool wasOverlayLowered = m_streamOverlayLowered;
     m_streamOverlayVisible = true;
+    m_streamNativeLowerPending = false;
     if (isStreamActive())
         m_streamOverlayHoldUntilMs = QDateTime::currentMSecsSinceEpoch() + 2000;
 
@@ -838,8 +840,10 @@ void WebView::hideApplicationOverlay(const QString &reason)
         qDebug() << "[OpenHbbTV] skip auto hide while stream overlay is explicitly visible" << reason;
         return;
     }
-    if (reasonLower.contains(QStringLiteral("auto hide")) && !m_streamOverlayVisible && m_streamOverlayLowered) {
-        qDebug() << "[OpenHbbTV] skip duplicate auto hide after browser already hidden/parked" << reason;
+    if (reasonLower.contains(QStringLiteral("auto hide")) && !m_streamOverlayVisible
+            && (m_streamOverlayLowered || m_streamNativeLowerPending)) {
+        qDebug() << "[OpenHbbTV] skip duplicate auto hide after browser already hidden/parked" << reason
+                 << "pendingLower" << m_streamNativeLowerPending;
         return;
     }
     m_streamOverlayVisible = false;
@@ -871,8 +875,47 @@ void WebView::hideApplicationOverlay(const QString &reason)
             || hideMode == QStringLiteral("tiny")
             || hideMode == QStringLiteral("move")
             || hideMode == QStringLiteral("safe");
+        const int deferLowerMs = openHbbTVEnvInt("OPENHBBTV_STREAM_DEFER_NATIVE_LOWER_MS", 650, 0, 5000);
+        const bool deferredLower = preStreamHide
+            && deferLowerMs > 0
+            && !nativeHide
+            && !keepMode
+            && !parkMode
+            && !reasonLower.contains(QStringLiteral("deferred"))
+            && !m_streamNativeLowerPending;
 
-        if (nativeHide) {
+        if (deferredLower) {
+            QPointer<QWidget> topPtr(top);
+            m_streamNativeLowerPending = true;
+            qDebug() << "[OpenHbbTV] defer browser native lower for stream" << reason
+                     << "delay" << deferLowerMs << top->geometry()
+                     << "visible" << top->isVisible();
+            QTimer::singleShot(deferLowerMs, this, [this, topPtr, reason, deferLowerMs]() {
+                if (!topPtr || m_streamState != 1 || m_streamOverlayVisible) {
+                    qDebug() << "[OpenHbbTV] skip deferred browser native lower" << reason
+                             << "delay" << deferLowerMs
+                             << "top" << static_cast<bool>(topPtr)
+                             << "state" << m_streamState
+                             << "overlayVisible" << m_streamOverlayVisible;
+                    m_streamNativeLowerPending = false;
+                    return;
+                }
+                if (m_streamOverlayGeometryValid)
+                    topPtr->setGeometry(m_streamOverlaySavedGeometry);
+                if (!topPtr->isVisible()) {
+                    topPtr->showFullScreen();
+                    qDebug() << "[OpenHbbTV] recreate visible browser surface before deferred lower"
+                             << reason << topPtr->geometry();
+                }
+                topPtr->lower();
+                m_streamOverlayLowered = true;
+                m_streamNativeLowerPending = false;
+                qDebug() << "[OpenHbbTV] deferred lower browser window for stream without native hide"
+                         << reason << "delay" << deferLowerMs
+                         << topPtr->geometry() << "visible" << topPtr->isVisible();
+                QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
+            });
+        } else if (nativeHide) {
             // Diagnostic opt-in. On Vu+/eglfs_libvupl with alpha enabled,
             // top-level hide maps to VUGLES_SetVisible(false) and can crash the
             // WebEngine renderer. The launcher defaults to lower/transparent.
@@ -917,8 +960,10 @@ void WebView::hideApplicationOverlay(const QString &reason)
             qDebug() << "[OpenHbbTV] lower browser window for stream without native hide (vod-style)" << reason
                      << top->geometry() << "visible" << top->isVisible();
         }
-        m_streamOverlayLowered = true;
-        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
+        if (!deferredLower) {
+            m_streamOverlayLowered = true;
+            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
+        }
     }
 }
 
@@ -964,6 +1009,7 @@ void WebView::setStreamState(int state, int error)
         m_hasStreamPosition = false;
         m_lastStreamPositionMs = -1;
         m_lastStreamDurationMs = -1;
+        m_streamNativeLowerPending = false;
     }
     const QString silentPlayingValue = QString::fromLocal8Bit(qgetenv("OPENHBBTV_STREAM_SILENT_PLAYING_STATE")).trimmed().toLower();
     const bool silentPlayingState = state == 1 && !m_streamOverlayVisible &&
