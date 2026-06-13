@@ -31521,6 +31521,9 @@ class OipfVideoBroadcastMapper {
         const zdfSilentBroadcastObject = () => {
             return window.OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT === true && isZdfPage();
         };
+        const zdfSkipBroadcastAudioComponents = () => {
+            return window.OPENHBBTV_ZDF_SKIP_BROADCAST_AUDIO_COMPONENTS === true && isZdfPage();
+        };
         const zdfTrace = (label, value) => {
             try {
                 if (window.OPENHBBTV_ZDF_BOOT_TRACE !== true || !isZdfPage()) {
@@ -31807,9 +31810,9 @@ class OipfVideoBroadcastMapper {
             } catch (e) {
             }
         };
-        Object.defineProperty(oipfPluginObject, 'COMPONENT_TYPE_VIDEO', { value: 0, enumerable: true });
-        Object.defineProperty(oipfPluginObject, 'COMPONENT_TYPE_AUDIO', { value: 1, enumerable: true });
-        Object.defineProperty(oipfPluginObject, 'COMPONENT_TYPE_SUBTITLE', { value: 2, enumerable: true });
+        Object.defineProperty(oipfPluginObject, 'COMPONENT_TYPE_VIDEO', { value: 0, enumerable: true, configurable: true, writable: true });
+        Object.defineProperty(oipfPluginObject, 'COMPONENT_TYPE_AUDIO', { value: zdfSkipBroadcastAudioComponents() ? undefined : 1, enumerable: true, configurable: true, writable: true });
+        Object.defineProperty(oipfPluginObject, 'COMPONENT_TYPE_SUBTITLE', { value: 2, enumerable: true, configurable: true, writable: true });
         class AVComponent {
             constructor() {
                 this.COMPONENT_TYPE_VIDEO = 0;
@@ -31862,6 +31865,10 @@ class OipfVideoBroadcastMapper {
             return collection;
         }
         oipfPluginObject.getComponents = (function (type) {
+            if (zdfSkipBroadcastAudioComponents()) {
+                zdfTrace('silent broadcast components', 'empty type=' + String(type));
+                return makeAVComponentCollection([]);
+            }
             if (type === undefined || type === null) {
                 return makeAVComponentCollection([new AVVideoComponent(), new AVAudioComponent(), new AVSubtitleComponent()]);
             }
@@ -31879,8 +31886,18 @@ class OipfVideoBroadcastMapper {
         }).bind(oipfPluginObject);
         // TODO: read those values from a message to the extension (+ using a dedicated worker to retrieve those values from the TS file inside broadcast_url form field)
         oipfPluginObject.getCurrentActiveComponents = (function (type) { return this.getComponents(type); }).bind(oipfPluginObject);
-        oipfPluginObject.selectComponent = (function (cpt) { return true; }).bind(oipfPluginObject);
-        oipfPluginObject.unselectComponent = (function (cpt) { return true; }).bind(oipfPluginObject);
+        oipfPluginObject.selectComponent = (function (cpt) {
+            if (zdfSkipBroadcastAudioComponents()) {
+                zdfTrace('silent broadcast selectComponent', 'skip');
+            }
+            return true;
+        }).bind(oipfPluginObject);
+        oipfPluginObject.unselectComponent = (function (cpt) {
+            if (zdfSkipBroadcastAudioComponents()) {
+                zdfTrace('silent broadcast unselectComponent', 'skip');
+            }
+            return true;
+        }).bind(oipfPluginObject);
         oipfPluginObject.setFullScreen = (function (state) {
             if (zdfSilentBroadcastObject()) {
                 if (state) {

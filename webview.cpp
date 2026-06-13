@@ -519,6 +519,7 @@ void WebView::injectXmlHttpRequestScripts()
         const bool zdfSafeInitFetch = openHbbTVEnvEnabled("OPENHBBTV_ZDF_SAFE_INIT_FETCH", false);
         const bool zdfDirectInitRequest = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DIRECT_INIT_REQUEST", false);
         const bool zdfSilentBroadcastObject = openHbbTVEnvEnabled("OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT", true);
+        const bool zdfSkipBroadcastAudioComponents = openHbbTVEnvEnabled("OPENHBBTV_ZDF_SKIP_BROADCAST_AUDIO_COMPONENTS", true);
         source.prepend(QStringLiteral("window.OPENHBBTV_AUTH_HTTP_DEBUG=%1;\n"
                                       "window.OPENHBBTV_HBBTV_HTTP_DEBUG=%2;\n"
                                       "window.OPENHBBTV_HBBTV_HTTP_BODY_DEBUG=%3;\n"
@@ -549,6 +550,8 @@ void WebView::injectXmlHttpRequestScripts()
                            .arg(zdfDirectInitRequest ? QStringLiteral("true") : QStringLiteral("false")));
         source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT=%1;\n")
                            .arg(zdfSilentBroadcastObject ? QStringLiteral("true") : QStringLiteral("false")));
+        source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_SKIP_BROADCAST_AUDIO_COMPONENTS=%1;\n")
+                           .arg(zdfSkipBroadcastAudioComponents ? QStringLiteral("true") : QStringLiteral("false")));
 
         QWebEngineScript script;
         script.setName("xmlhttprequest_quirks");
@@ -571,7 +574,8 @@ void WebView::injectXmlHttpRequestScripts()
                  << "zdf safe init fetch" << zdfSafeInitFetch
                  << "zdf direct init request" << zdfDirectInitRequest
                  << "zdf stable object entries" << zdfStableObjectEntries
-                 << "zdf silent broadcast object" << zdfSilentBroadcastObject;
+                 << "zdf silent broadcast object" << zdfSilentBroadcastObject
+                 << "zdf skip broadcast audio components" << zdfSkipBroadcastAudioComponents;
     } else {
         qWarning() << "[HbbTV] xmlhttprequest_quirks.js not found in qrc";
     }

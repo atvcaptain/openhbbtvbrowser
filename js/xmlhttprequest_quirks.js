@@ -62,6 +62,10 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     return window.OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT === true && isZdfPage();
   }
 
+  function zdfSkipBroadcastAudioComponentsEnabled() {
+    return window.OPENHBBTV_ZDF_SKIP_BROADCAST_AUDIO_COMPONENTS === true && isZdfPage();
+  }
+
   function zdfDeepProbeEnabled() {
     return window.OPENHBBTV_ZDF_DEEP_PROBE === true;
   }
@@ -556,6 +560,10 @@ window.cefXmlHttpRequestQuirk = function(uri) {
       }
 
       function componentsFor(type) {
+        if (zdfSkipBroadcastAudioComponentsEnabled()) {
+          zdfTrace("silent broadcast components", "empty type=" + String(type));
+          return makeCollection([]);
+        }
         if (type === undefined || type === null)
           return makeCollection([makeComponent(0), makeComponent(1), makeComponent(2)]);
         type = Number(type);
@@ -597,12 +605,28 @@ window.cefXmlHttpRequestQuirk = function(uri) {
         }
       }
 
+      function defineValue(obj, name, value) {
+        try {
+          Object.defineProperty(obj, name, {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: value
+          });
+        } catch (ignore) {
+          try { obj[name] = value; } catch (ignoreAssign) {}
+        }
+      }
+
       function ensureBroadcastObject(obj) {
         if (!obj)
           return obj;
         try {
           defineConstant(obj, "COMPONENT_TYPE_VIDEO", 0);
-          defineConstant(obj, "COMPONENT_TYPE_AUDIO", 1);
+          if (zdfSkipBroadcastAudioComponentsEnabled())
+            defineValue(obj, "COMPONENT_TYPE_AUDIO", undefined);
+          else
+            defineConstant(obj, "COMPONENT_TYPE_AUDIO", 1);
           defineConstant(obj, "COMPONENT_TYPE_SUBTITLE", 2);
           if (typeof obj.playState !== "number")
             obj.playState = 0;
@@ -785,10 +809,14 @@ window.cefXmlHttpRequestQuirk = function(uri) {
       });
       installMethod("selectComponent", function() {
         ensureBroadcastObject(this);
+        if (zdfSkipBroadcastAudioComponentsEnabled())
+          zdfTrace("silent broadcast selectComponent", "skip");
         return true;
       });
       installMethod("unselectComponent", function() {
         ensureBroadcastObject(this);
+        if (zdfSkipBroadcastAudioComponentsEnabled())
+          zdfTrace("silent broadcast unselectComponent", "skip");
         return true;
       });
       installMethod("setFullScreen", function(state) {
