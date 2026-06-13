@@ -31284,12 +31284,35 @@ function init() {
             if (!hint) {
                 return null;
             }
+            function hintScore(item) {
+                if (!item || !item.found) {
+                    return -1;
+                }
+                var source = String(item.source || "");
+                var text = String(item.text || "");
+                var element = String(item.element || "");
+                var score = 10;
+                if (source === "selected" || source === "active-ancestor") {
+                    score = 100;
+                } else if (source === "body-text") {
+                    score = 20;
+                } else if (element && element !== "BODY") {
+                    score = 50;
+                }
+                if (/zur.ck\s+zu\s+live|^live\b|\blive\b/i.test(text)) {
+                    score -= 10;
+                }
+                return score;
+            }
             var cached = ns.lastReplayTimelineHint || null;
             var cachedFresh = !!(cached && cached.cachedAt && (nowMs - Number(cached.cachedAt || 0)) < 15000);
             var mediaReason = /^(avcontrol|video-currentTime)/.test(String(reason || ""));
             if (hint.found) {
-                if (mediaReason && cachedFresh && cached.start && cached.start !== hint.start &&
-                    (hint.source === "body-text" || Number(hint.priority || 9) >= 4)) {
+                var cachedScore = hintScore(cached);
+                var hintScoreValue = hintScore(hint);
+                if (cachedFresh && cached.start &&
+                    (mediaReason || hint.source === "body-text" || hintScoreValue < cachedScore) &&
+                    cachedScore > hintScoreValue) {
                     hint = Object.assign({}, cached, {
                         found: true,
                         cached: true,
