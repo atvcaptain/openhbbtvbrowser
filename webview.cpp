@@ -541,7 +541,12 @@ void WebView::showApplicationOverlay(const QString &reason)
 {
     setStreamRendererActive(true, QStringLiteral("show overlay ") + reason);
 
-    const bool streamReason = isStreamActive() && reason.toLower().contains(QStringLiteral("stream"));
+    const QString reasonLower = reason.toLower();
+    const bool streamReason = isStreamActive() && reasonLower.contains(QStringLiteral("stream"));
+    const bool postStreamReturn = reasonLower.contains(QStringLiteral("stream state stopped"))
+        || reasonLower.contains(QStringLiteral("live stream stopped"))
+        || reasonLower == QStringLiteral("stream stopped");
+    const bool pageLoadRefresh = reasonLower.contains(QStringLiteral("page load finished"));
     const bool wasOverlayVisible = m_streamOverlayVisible;
     const bool wasOverlayLowered = m_streamOverlayLowered;
     m_streamOverlayVisible = true;
@@ -553,13 +558,15 @@ void WebView::showApplicationOverlay(const QString &reason)
              << "wasLowered" << wasOverlayLowered;
 
     QWidget *top = window();
-    const bool duplicateVisibleStreamOverlay = streamReason && wasOverlayVisible && !wasOverlayLowered && top && top->isVisible();
-    if (duplicateVisibleStreamOverlay) {
+    const bool duplicateVisibleOverlay = (streamReason || postStreamReturn || pageLoadRefresh)
+        && wasOverlayVisible && !wasOverlayLowered && top && top->isVisible();
+    if (duplicateVisibleOverlay) {
         // Preserve the proven key/RCU path.  Only suppress repeated native
-        // EGL/libvupl refresh work when the stream overlay is already visible.
-        // Repeating showFullScreen/raise/activate/repaint on every key can
-        // leave shifted or transparent browser fragments.
-        qDebug() << "[OpenHbbTV] skip duplicate stream overlay native refresh" << reason
+        // EGL/libvupl refresh work when the overlay is already visible.
+        // Repeating showFullScreen/raise/activate/repaint on every key or
+        // post-stream page load can leave shifted fragments or crash the
+        // WebEngine renderer on libvupl.
+        qDebug() << "[OpenHbbTV] skip duplicate visible overlay native refresh" << reason
                  << top->geometry() << "visible" << top->isVisible();
     } else if (top) {
         if (wasOverlayLowered) {
@@ -592,21 +599,20 @@ void WebView::showApplicationOverlay(const QString &reason)
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
         m_streamOverlayLowered = false;
     }
-    if (streamReason && !duplicateVisibleStreamOverlay) {
+    if (streamReason && !duplicateVisibleOverlay) {
         retryStreamOverlayVisible(reason, 120);
         retryStreamOverlayVisible(reason, 450);
         retryStreamOverlayVisible(reason, 900);
     }
-    const bool postStreamReturn = reason.toLower().contains(QStringLiteral("stream state stopped"));
-    if ((streamReason && !duplicateVisibleStreamOverlay) || postStreamReturn) {
+    if ((streamReason && !duplicateVisibleOverlay) || (postStreamReturn && !duplicateVisibleOverlay)) {
         repaintOverlaySurface(reason);
         retryOverlayRepaint(reason, 120);
         retryOverlayRepaint(reason, 450);
     }
-    const bool skipDuplicateOverlayJs = duplicateVisibleStreamOverlay &&
+    const bool skipDuplicateOverlayJs = duplicateVisibleOverlay &&
         openHbbTVEnvEnabled("OPENHBBTV_STREAM_SKIP_DUPLICATE_OVERLAY_JS", true);
     if (skipDuplicateOverlayJs) {
-        qDebug() << "[OpenHbbTV] skip duplicate stream overlay JS refresh" << reason;
+        qDebug() << "[OpenHbbTV] skip duplicate visible overlay JS refresh" << reason;
     } else {
         runJavaScriptWithWatchdog(QStringLiteral("showApplicationOverlay ") + reason, QString::fromLatin1(
             "(function() {"
