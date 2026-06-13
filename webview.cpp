@@ -774,6 +774,11 @@ void WebView::showApplicationOverlay(const QString &reason)
         });
     }
     if (m_streamState == 1 && m_streamOverlayVisible && m_hasStreamPosition) {
+        if (openHbbTVEnvEnabled("OPENHBBTV_STREAM_SKIP_VISIBLE_POSITION_JS", true)) {
+            qDebug() << "[OpenHbbTV] skip deferred visible stream position JS; E2 owns external playback"
+                     << reason << m_lastStreamPositionMs << m_lastStreamDurationMs;
+            return;
+        }
         QTimer::singleShot(220, this, [this, reason]() {
             if (m_streamState != 1 || !m_streamOverlayVisible || !m_hasStreamPosition)
                 return;
@@ -1169,13 +1174,20 @@ void WebView::setStreamPosition(qint64 positionMs, qint64 durationMs)
     m_hasStreamPosition = positionMs >= 0 || durationMs >= 0;
     const bool skipHiddenPositionJs = m_streamState == 1 && !m_streamOverlayVisible &&
         openHbbTVEnvEnabled("OPENHBBTV_STREAM_SKIP_HIDDEN_POSITION_JS", true);
+    const bool skipVisiblePositionJs = m_streamState == 1 && m_streamOverlayVisible &&
+        openHbbTVEnvEnabled("OPENHBBTV_STREAM_SKIP_VISIBLE_POSITION_JS", true);
     qDebug() << "[OpenHbbTV] setStreamPosition" << positionMs << durationMs
               << "streamState" << m_streamState
               << "overlayVisible" << m_streamOverlayVisible
-              << "skipHiddenPositionJs" << skipHiddenPositionJs;
+              << "skipHiddenPositionJs" << skipHiddenPositionJs
+              << "skipVisiblePositionJs" << skipVisiblePositionJs;
     recordDiagnosticEvent(QStringLiteral("setStreamPosition %1,%2").arg(positionMs).arg(durationMs));
     if (skipHiddenPositionJs) {
         qDebug() << "[OpenHbbTV] skip hidden stream position JS; E2 owns external playback";
+        return;
+    }
+    if (skipVisiblePositionJs) {
+        qDebug() << "[OpenHbbTV] skip visible stream position JS; E2 owns external playback";
         return;
     }
     QString s = QString::fromLatin1("(function() {"
