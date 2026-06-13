@@ -29951,7 +29951,7 @@ class OipfAVControlMapper {
             if (window.HBBTV_POLYFILL_NS.suppressNativeObjectData) {
                 window.HBBTV_POLYFILL_NS.suppressNativeObjectData(this.avControlObject, this.originalDataAttribute, 'avcontrol constructor');
             } else {
-                this.avControlObject.removeAttribute('data');
+                this.avControlObject.setAttribute('data', 'about:blank');
             }
         } catch (ignoreDataSuppress) {
         }
@@ -30100,7 +30100,7 @@ class OipfAVControlMapper {
                 if (window.HBBTV_POLYFILL_NS && window.HBBTV_POLYFILL_NS.suppressNativeObjectData) {
                     window.HBBTV_POLYFILL_NS.suppressNativeObjectData(this.avControlObject, this.avControlObject.__openhbbtvOriginalDataAttribute || rawData, 'avcontrol ' + reason);
                 } else if (rawData) {
-                    this.avControlObject.removeAttribute('data');
+                    this.avControlObject.setAttribute('data', 'about:blank');
                 }
             } catch (ignoreAttr) {
             }
@@ -30179,7 +30179,7 @@ class OipfAVControlMapper {
                     if (window.HBBTV_POLYFILL_NS && window.HBBTV_POLYFILL_NS.suppressNativeObjectData) {
                         window.HBBTV_POLYFILL_NS.suppressNativeObjectData(this.avControlObject, currentData, 'avcontrol updateOriginalDataAttribute');
                     } else if (rawData) {
-                        this.avControlObject.removeAttribute('data');
+                        this.avControlObject.setAttribute('data', 'about:blank');
                     }
                 } catch (ignoreBlank) {
                 }
@@ -30277,7 +30277,7 @@ class OipfAVControlMapper {
                         if (window.HBBTV_POLYFILL_NS && window.HBBTV_POLYFILL_NS.suppressNativeObjectData) {
                             window.HBBTV_POLYFILL_NS.suppressNativeObjectData(this.avControlObject, currentData, 'avcontrol mutation data');
                         } else if (rawData) {
-                            this.avControlObject.removeAttribute('data');
+                            this.avControlObject.setAttribute('data', 'about:blank');
                         }
                     } catch (ignoreBlank) {
                     }
@@ -31813,6 +31813,39 @@ class OipfVideoBroadcastMapper {
         return '';
     }
 
+    function blankNativeObjectData(objectElement, reason, rememberedUrl) {
+        try {
+            if (!objectElement || !objectElement.setAttribute) {
+                return false;
+            }
+            if (objectElement.__openhbbtvBlankingNativeData) {
+                return false;
+            }
+            objectElement.__openhbbtvBlankingNativeData = true;
+            try {
+                var rawData = objectElement.getAttribute ? objectElement.getAttribute('data') : null;
+                if (rawData !== 'about:blank') {
+                    var nativeSetAttribute = ns.html5VodNativeSetAttribute || null;
+                    if (nativeSetAttribute) {
+                        nativeSetAttribute.call(objectElement, 'data', 'about:blank');
+                    } else {
+                        objectElement.setAttribute('data', 'about:blank');
+                    }
+                    log('object.data native blanked reason=' + reason + ' url=' + (rememberedUrl || objectElement.__openhbbtvOriginalDataAttribute || ''));
+                }
+            } finally {
+                objectElement.__openhbbtvBlankingNativeData = false;
+            }
+            return true;
+        } catch (blankError) {
+            try { objectElement.__openhbbtvBlankingNativeData = false; } catch (ignoreFlag) {}
+            log('object.data native blank failed reason=' + reason + ' error=' + blankError);
+            return false;
+        }
+    }
+
+    ns.blankNativeObjectData = blankNativeObjectData;
+
     function suppressNativeObjectData(objectElement, url, reason) {
         try {
             if (!objectElement) {
@@ -31849,13 +31882,7 @@ class OipfVideoBroadcastMapper {
                 }
             }
 
-            try {
-                if (objectElement.getAttribute && objectElement.getAttribute('data') !== null) {
-                    objectElement.removeAttribute('data');
-                }
-            } catch (removeError) {
-                log('object.data native remove failed reason=' + reason + ' error=' + removeError);
-            }
+            blankNativeObjectData(objectElement, reason, objectElement.__openhbbtvOriginalDataAttribute || remembered || '');
             return true;
         } catch (error) {
             log('object.data native suppress failed reason=' + reason + ' error=' + error);
@@ -31965,6 +31992,7 @@ class OipfVideoBroadcastMapper {
         if (!nativeSetAttribute) {
             return false;
         }
+        ns.html5VodNativeSetAttribute = ns.html5VodNativeSetAttribute || nativeSetAttribute;
         window.Element.prototype.setAttribute = function (name, value) {
             try {
                 var tag = this.tagName ? String(this.tagName).toLowerCase() : '';
@@ -32087,6 +32115,9 @@ class OipfVideoBroadcastMapper {
         var nativeLoad = mediaProto.load;
         var nativeSetAttribute = window.Element && window.Element.prototype && window.Element.prototype.setAttribute;
         var srcDescriptor = Object.getOwnPropertyDescriptor(mediaProto, 'src');
+        if (nativeSetAttribute && !ns.html5VodNativeSetAttribute) {
+            ns.html5VodNativeSetAttribute = nativeSetAttribute;
+        }
 
         mediaProto.play = function () {
             var tag = this.tagName ? String(this.tagName).toLowerCase() : '';
