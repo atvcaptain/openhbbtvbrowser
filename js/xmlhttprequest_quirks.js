@@ -67,6 +67,105 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     }
   }
 
+  function zdfStableObjectEntriesEnabled() {
+    return window.OPENHBBTV_ZDF_STABLE_OBJECT_ENTRIES !== false;
+  }
+
+  function installZdfStableObjectEntries() {
+    if (!zdfStableObjectEntriesEnabled() || !isZdfPage() || Object.__openhbbtvZdfStableObjectEntries)
+      return;
+
+    try {
+      var objectKeys = Object.keys;
+
+      function stableEntries(value) {
+        if (value === null || value === undefined)
+          throw new TypeError("Cannot convert undefined or null to object");
+        var object = Object(value);
+        var keys = objectKeys(object);
+        var result = [];
+        for (var i = 0; i < keys.length; i++) {
+          var key = keys[i];
+          result.push([key, object[key]]);
+        }
+        return result;
+      }
+
+      function assignEntry(target, entry) {
+        if (entry === null || entry === undefined)
+          throw new TypeError("Iterator value " + entry + " is not an entry object");
+        if (typeof entry !== "object" && typeof entry !== "function")
+          throw new TypeError("Iterator value " + entry + " is not an entry object");
+        var pair = Object(entry);
+        target[pair[0]] = pair[1];
+      }
+
+      function stableFromEntries(iterable) {
+        if (iterable === null || iterable === undefined)
+          throw new TypeError("undefined is not iterable");
+
+        var result = {};
+        var index = 0;
+        var length = Number(iterable.length);
+        if (length === length && length >= 0 && !iterable.next) {
+          for (; index < length; index++) {
+            if (index in Object(iterable))
+              assignEntry(result, iterable[index]);
+          }
+          return result;
+        }
+
+        if (typeof Symbol !== "undefined" && iterable[Symbol.iterator]) {
+          var iterator = iterable[Symbol.iterator]();
+          var step;
+          while (!(step = iterator.next()).done)
+            assignEntry(result, step.value);
+          return result;
+        }
+
+        throw new TypeError("Object.fromEntries() requires a single iterable argument");
+      }
+
+      stableEntries.__openhbbtvZdfStableObjectEntries = true;
+      stableFromEntries.__openhbbtvZdfStableObjectEntries = true;
+
+      function install() {
+        try {
+          if (Object.entries !== stableEntries) {
+            Object.defineProperty(Object, "entries", {
+              configurable: true,
+              writable: true,
+              value: stableEntries
+            });
+          }
+          if (Object.fromEntries !== stableFromEntries) {
+            Object.defineProperty(Object, "fromEntries", {
+              configurable: true,
+              writable: true,
+              value: stableFromEntries
+            });
+          }
+        } catch (error) {
+          if (zdfBootDebugEnabled())
+            log("ZDFBOOT", "stable Object.entries install failed " + stackText(error));
+        }
+      }
+
+      install();
+      setTimeout(install, 0);
+      setTimeout(install, 50);
+      setTimeout(install, 250);
+      setTimeout(install, 1000);
+
+      Object.__openhbbtvZdfStableObjectEntries = true;
+      if (zdfBootDebugEnabled())
+        log("ZDFBOOT", "stable Object.entries/fromEntries installed");
+    } catch (error) {
+      if (zdfBootDebugEnabled())
+        log("ZDFBOOT", "stable Object.entries setup failed " + stackText(error));
+    }
+  }
+
   function shouldLogAuth(url) {
     url = String(url || "");
     return url.indexOf("accounts.ard.de/device/") >= 0 ||
@@ -889,6 +988,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
   }
 
   try {
+    installZdfStableObjectEntries();
     installEarlyVideoBroadcastShim();
     installZdfConsoleFlag();
     installZdfConsoleBridge();
