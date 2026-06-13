@@ -30098,6 +30098,22 @@ class OipfAVControlMapper {
             send("LOG:AVControl#" + this.avControlId + " " + message + " state=" + this.avControlObject.playState + " speed=" + this.avControlObject.speed + " pos=" + this.avControlObject.playPosition + " time=" + this.avControlObject.playTime + " active=" + describeElement(document.activeElement) + " lastKey=" + lastKeySummary());
         };
 
+        const shouldSuppressExternalPlayStateEvent = (state, reason) => {
+            try {
+                const ns = window.HBBTV_POLYFILL_NS || {};
+                if (ns.suppressExternalAvPlayStateEvents === false) {
+                    return false;
+                }
+                if (state !== PLAY_STATES.connecting) {
+                    return false;
+                }
+                const text = String(reason || "").toLowerCase();
+                return text.indexOf("play(") === 0;
+            } catch (ignore) {
+                return false;
+            }
+        };
+
         const blockNativeAvSurface = (reason) => {
             try {
                 const rawData = this.avControlObject.getAttribute ? (this.avControlObject.getAttribute('data') || '') : '';
@@ -30143,6 +30159,10 @@ class OipfAVControlMapper {
         const dispatchPlayState = (state, reason) => {
             this.avControlObject.playState = state;
             trace("PlayStateChange -> " + state + " reason=" + (reason || ""));
+            if (shouldSuppressExternalPlayStateEvent(state, reason)) {
+                send("LOG:AVControl#" + this.avControlId + " PlayStateChange event suppressed state=" + state + " reason=" + (reason || "") + " E2 owns external playback");
+                return;
+            }
             var playerEvent = new Event('PlayStateChange');
             playerEvent.state = state;
             if (this.avControlObject.onPlayStateChange) {
