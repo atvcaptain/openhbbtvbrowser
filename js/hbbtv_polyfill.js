@@ -31246,7 +31246,26 @@ function init() {
             streamEventListeners: [],
         }
     };
-    window.HBBTV_POLYFILL_NS.currentChannel = window.HBBTV_POLYFILL_NS.currentChannel || {
+    window.HBBTV_POLYFILL_NS.normaliseChannel = function (channel) {
+        channel = channel || {};
+        function numberOrDefault(value, fallback) {
+            var number = Number(value);
+            return value === undefined || value === null || value === '' || number !== number ? fallback : number;
+        }
+        var onid = numberOrDefault(channel.onid, 1);
+        var tsid = numberOrDefault(channel.tsid, 1);
+        var sid = numberOrDefault(channel.sid, 1);
+        channel.TYPE_TV = channel.TYPE_TV || 12;
+        channel.channelType = channel.channelType || 12;
+        channel.sid = sid;
+        channel.onid = onid;
+        channel.tsid = tsid;
+        channel.name = channel.name || '';
+        channel.ccid = channel.ccid || ('ccid:dvbt.' + onid + '.' + tsid + '.' + sid);
+        channel.dsd = channel.dsd || '';
+        return channel;
+    };
+    window.HBBTV_POLYFILL_NS.currentChannel = window.HBBTV_POLYFILL_NS.normaliseChannel(window.HBBTV_POLYFILL_NS.currentChannel || {
         'TYPE_TV': 12,
         'channelType': 12,
         'sid': 1,
@@ -31255,7 +31274,7 @@ function init() {
         'name': 'test',
         'ccid': 'ccid:dvbt.0',
         'dsd': ''
-    };
+    });
     window.HBBTV_POLYFILL_NS.preferredLanguage = window.HBBTV_POLYFILL_NS.preferredLanguage || 'DEU';
     window.HBBTV_POLYFILL_NS.getBroadcastTimelinePosition = function () {
         var ns = window.HBBTV_POLYFILL_NS || {};
@@ -31716,8 +31735,9 @@ class OipfVideoBroadcastMapper {
         window.HBBTV_POLYFILL_NS.applyBroadcastInfo = function(info) {
             info = info || {};
             if (info.channel) {
-                window.HBBTV_POLYFILL_NS.currentChannel = info.channel;
-                currentChannel = info.channel;
+                var channel = window.HBBTV_POLYFILL_NS.normaliseChannel(info.channel);
+                window.HBBTV_POLYFILL_NS.currentChannel = channel;
+                currentChannel = channel;
                 oipfPluginObject.currentChannel = currentChannel;
             }
             window.HBBTV_POLYFILL_NS.broadcastProgrammes = info.programmes || window.HBBTV_POLYFILL_NS.broadcastProgrammes || [];

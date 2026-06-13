@@ -46,6 +46,10 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     return window.OPENHBBTV_ZDF_DEEP_PROBE === true;
   }
 
+  function zdfInitDetailDebugEnabled() {
+    return zdfDeepProbeEnabled() || window.OPENHBBTV_ZDF_INIT_DETAIL_DEBUG === true;
+  }
+
   function isZdfPage() {
     try {
       var host = String((window.location && window.location.hostname) || "").toLowerCase();
@@ -153,7 +157,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
 
   function logZdfInitDetails(url, body) {
     try {
-      if (!zdfBootDebugEnabled() || String(url || "").toLowerCase().indexOf("/al/init") < 0)
+      if (!zdfInitDetailDebugEnabled() || !isZdfInitUrl(url))
         return;
       var value = JSON.parse(String(body || ""));
       var dataObj = value && value.data && typeof value.data === "object" ? value.data : null;
@@ -184,8 +188,22 @@ window.cefXmlHttpRequestQuirk = function(uri) {
 
   function isZdfInitUrl(url) {
     try {
-      return zdfBootDebugEnabled() && isZdfPage() &&
+      return isZdfPage() &&
              String(url || "").toLowerCase().indexOf("/al/init") >= 0;
+    } catch (ignore) {
+      return false;
+    }
+  }
+
+  function shouldReadResponseBody(labels, url) {
+    try {
+      if (!labels || !labels.length)
+        return false;
+      for (var i = 0; i < labels.length; i++) {
+        if (labels[i] === "AUTHHTTP")
+          return true;
+      }
+      return hbbtvBodyDebugEnabled() || (zdfInitDetailDebugEnabled() && isZdfInitUrl(url));
     } catch (ignore) {
       return false;
     }
@@ -310,13 +328,37 @@ window.cefXmlHttpRequestQuirk = function(uri) {
       function currentChannel() {
         var ns = namespace();
         ns.currentChannel = ns.currentChannel || {
+          TYPE_TV: 12,
+          channelType: 12,
           onid: 1,
           tsid: 1,
           sid: 1,
           ccid: "ccid:dvbt.1.1.1",
-          name: ""
+          name: "",
+          dsd: ""
         };
+        ns.currentChannel = normaliseChannel(ns.currentChannel);
         return ns.currentChannel;
+      }
+
+      function normaliseChannel(channel) {
+        channel = channel || {};
+        function numberOrDefault(value, fallback) {
+          var number = Number(value);
+          return value === undefined || value === null || value === "" || number !== number ? fallback : number;
+        }
+        var onid = numberOrDefault(channel.onid, 1);
+        var tsid = numberOrDefault(channel.tsid, 1);
+        var sid = numberOrDefault(channel.sid, 1);
+        channel.TYPE_TV = channel.TYPE_TV || 12;
+        channel.channelType = channel.channelType || 12;
+        channel.onid = onid;
+        channel.tsid = tsid;
+        channel.sid = sid;
+        channel.ccid = channel.ccid || ("ccid:dvbt." + onid + "." + tsid + "." + sid);
+        channel.name = channel.name || "";
+        channel.dsd = channel.dsd || "";
+        return channel;
       }
 
       function makeCollection(items) {
@@ -503,6 +545,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
       installMethod("setChannel", function(channel) {
         ensureBroadcastObject(this);
         if (channel) {
+          channel = normaliseChannel(channel);
           namespace().currentChannel = channel;
           this.currentChannel = channel;
           send("SET_CHANNEL:" + JSON.stringify({
@@ -895,18 +938,22 @@ window.cefXmlHttpRequestQuirk = function(uri) {
         var xhr = this;
         var requestBody = bodyText(arguments.length ? arguments[0] : "");
         xhr.addEventListener("loadend", function() {
+          var readBody = shouldReadResponseBody(labels, xhr.__openhbbtvAuthUrl);
           var body = "";
-          try {
-            if (typeof xhr.responseText === "string")
-              body = xhr.responseText;
-          } catch (ignore) {}
+          if (readBody) {
+            try {
+              if (typeof xhr.responseText === "string")
+                body = xhr.responseText;
+            } catch (ignore) {}
+          }
           labels.forEach(function(label) {
             log(label, "XHR " + xhr.__openhbbtvAuthMethod + " " + xhr.__openhbbtvAuthUrl +
                 " status=" + xhr.status + " responseURL=" + (xhr.responseURL || "") +
                 (requestBody ? " request=" + requestBody : "") +
-                responseDetail(label, xhr.__openhbbtvAuthUrl, body));
+                (readBody ? responseDetail(label, xhr.__openhbbtvAuthUrl, body) : ""));
           });
-          logZdfInitDetails(xhr.__openhbbtvAuthUrl, body);
+          if (readBody)
+            logZdfInitDetails(xhr.__openhbbtvAuthUrl, body);
         });
       }
       return originalSend.apply(this, arguments);
@@ -930,6 +977,15 @@ window.cefXmlHttpRequestQuirk = function(uri) {
           var labels = labelsFor(url);
           installZdfResponseTextProbe(url, response);
           if (labels.length) {
+            if (!shouldReadResponseBody(labels, url)) {
+              labels.forEach(function(label) {
+                log(label, "fetch " + method + " " + url +
+                    " status=" + response.status +
+                    " responseURL=" + (response.url || "") +
+                    (requestBody ? " request=" + requestBody : ""));
+              });
+              return response;
+            }
             try {
               response.clone().text().then(function(body) {
                 labels.forEach(function(label) {

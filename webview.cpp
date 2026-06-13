@@ -498,6 +498,7 @@ void WebView::injectXmlHttpRequestScripts()
         const bool zdfConsoleDebug = openHbbTVEnvEnabled("OPENHBBTV_ZDF_CONSOLE_DEBUG", false);
         const bool zdfBootDebug = openHbbTVEnvEnabled("OPENHBBTV_ZDF_BOOT_DEBUG", false);
         const bool zdfDeepProbe = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DEEP_PROBE", false);
+        const bool zdfInitDetailDebug = openHbbTVEnvEnabled("OPENHBBTV_ZDF_INIT_DETAIL_DEBUG", false);
         const bool apiAuditDebug = openHbbTVEnvEnabled("OPENHBBTV_API_AUDIT_DEBUG", false);
         source.prepend(QStringLiteral("window.OPENHBBTV_AUTH_HTTP_DEBUG=%1;\n"
                                       "window.OPENHBBTV_HBBTV_HTTP_DEBUG=%2;\n"
@@ -505,13 +506,15 @@ void WebView::injectXmlHttpRequestScripts()
                                       "window.OPENHBBTV_ZDF_CONSOLE_DEBUG=%4;\n"
                                       "window.OPENHBBTV_ZDF_BOOT_DEBUG=%5;\n"
                                       "window.OPENHBBTV_ZDF_DEEP_PROBE=%6;\n"
-                                      "window.OPENHBBTV_API_AUDIT_DEBUG=%7;\n")
+                                      "window.OPENHBBTV_ZDF_INIT_DETAIL_DEBUG=%7;\n"
+                                      "window.OPENHBBTV_API_AUDIT_DEBUG=%8;\n")
                            .arg(authHttpDebug ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(hbbtvHttpDebug ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(hbbtvHttpBodyDebug ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(zdfConsoleDebug ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(zdfBootDebug ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(zdfDeepProbe ? QStringLiteral("true") : QStringLiteral("false"))
+                           .arg(zdfInitDetailDebug ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(apiAuditDebug ? QStringLiteral("true") : QStringLiteral("false")));
 
         QWebEngineScript script;
@@ -527,7 +530,8 @@ void WebView::injectXmlHttpRequestScripts()
                  << "hbbtv HTTP body debug" << hbbtvHttpBodyDebug
                  << "zdf console debug" << zdfConsoleDebug
                  << "zdf boot debug" << zdfBootDebug
-                 << "zdf deep probe" << zdfDeepProbe;
+                 << "zdf deep probe" << zdfDeepProbe
+                 << "zdf init detail debug" << zdfInitDetailDebug;
     } else {
         qWarning() << "[HbbTV] xmlhttprequest_quirks.js not found in qrc";
     }
@@ -544,10 +548,14 @@ void WebView::setCurrentChannel(const int &onid, const int &tsid, const int &sid
     QString s = QString::fromLatin1("(function() {"
                                     "  window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};"
                                     "  window.HBBTV_POLYFILL_NS.currentChannel = {"
+                                    "    TYPE_TV : 12,"
+                                    "    channelType : 12,"
                                     "    onid : %1,"
                                     "    tsid : %2,"
                                     "    sid  : %3,"
-                                    "    ccid : 'ccid:dvbt.%1.%2.%3'"
+                                    "    ccid : 'ccid:dvbt.%1.%2.%3',"
+                                    "    name : '',"
+                                    "    dsd : ''"
                                     "  };"
                                     "})();").arg(onid).arg(tsid).arg(sid);
 
@@ -578,10 +586,30 @@ void WebView::setBroadcastInfo(const QString &json)
     QString s = QString::fromLatin1(
         "(function() {"
         "  window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};"
+        "  function normaliseChannel(channel) {"
+        "    channel = channel || {};"
+        "    function numberOrDefault(value, fallback) {"
+        "      var number = Number(value);"
+        "      return value === undefined || value === null || value === '' || number !== number ? fallback : number;"
+        "    }"
+        "    var onid = numberOrDefault(channel.onid, 1);"
+        "    var tsid = numberOrDefault(channel.tsid, 1);"
+        "    var sid = numberOrDefault(channel.sid, 1);"
+        "    channel.TYPE_TV = channel.TYPE_TV || 12;"
+        "    channel.channelType = channel.channelType || 12;"
+        "    channel.onid = onid;"
+        "    channel.tsid = tsid;"
+        "    channel.sid = sid;"
+        "    channel.ccid = channel.ccid || ('ccid:dvbt.' + onid + '.' + tsid + '.' + sid);"
+        "    channel.name = channel.name || '';"
+        "    channel.dsd = channel.dsd || '';"
+        "    return channel;"
+        "  }"
         "  var raw = '';"
         "  try { raw = decodeURIComponent(escape(atob('%1'))); } catch (e) { raw = '{}'; }"
         "  try {"
         "    var info = JSON.parse(raw);"
+        "    if (info.channel) { info.channel = normaliseChannel(info.channel); }"
         "    window.HBBTV_POLYFILL_NS.broadcastInfo = info;"
         "    window.HBBTV_POLYFILL_NS.broadcastInfoReceivedAt = Date.now ? Date.now() : (new Date()).getTime();"
         "    if (info.channel) {"
