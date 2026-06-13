@@ -500,7 +500,7 @@ void WebView::setCurrentChannel(const int &onid, const int &tsid, const int &sid
 
     script.setName("current_channel");
     script.setSourceCode(s);
-    script.setInjectionPoint(QWebEngineScript::DocumentReady);
+    script.setInjectionPoint(QWebEngineScript::DocumentCreation);
     script.setRunsOnSubFrames(true);
     script.setWorldId(QWebEngineScript::MainWorld);
     page()->scripts().insert(script);
@@ -1489,6 +1489,9 @@ void WebView::loadFinished(bool ok)
                      << "target" << m_teletextReturnUrl.toString();
             m_teletextReturnInProgress = false;
             m_teletextReturnUrl = QUrl();
+            showApplicationOverlay(QStringLiteral("teletext return"));
+            retryOverlayRepaint(QStringLiteral("teletext return"), 120);
+            retryOverlayRepaint(QStringLiteral("teletext return"), 450);
             QTimer::singleShot(80, this, &WebView::refreshApplicationAfterTeletextReturn);
             QTimer::singleShot(450, this, &WebView::refreshApplicationAfterTeletextReturn);
         }
