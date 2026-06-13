@@ -494,10 +494,13 @@ void WebView::injectXmlHttpRequestScripts()
         quirks.close();
         const bool authHttpDebug = openHbbTVEnvEnabled("OPENHBBTV_AUTH_HTTP_DEBUG", false);
         const bool hbbtvHttpDebug = openHbbTVEnvEnabled("OPENHBBTV_HBBTV_HTTP_DEBUG", false);
+        const bool hbbtvHttpBodyDebug = openHbbTVEnvEnabled("OPENHBBTV_HBBTV_HTTP_BODY_DEBUG", false);
         source.prepend(QStringLiteral("window.OPENHBBTV_AUTH_HTTP_DEBUG=%1;\n"
-                                      "window.OPENHBBTV_HBBTV_HTTP_DEBUG=%2;\n")
+                                      "window.OPENHBBTV_HBBTV_HTTP_DEBUG=%2;\n"
+                                      "window.OPENHBBTV_HBBTV_HTTP_BODY_DEBUG=%3;\n")
                            .arg(authHttpDebug ? QStringLiteral("true") : QStringLiteral("false"))
-                           .arg(hbbtvHttpDebug ? QStringLiteral("true") : QStringLiteral("false")));
+                           .arg(hbbtvHttpDebug ? QStringLiteral("true") : QStringLiteral("false"))
+                           .arg(hbbtvHttpBodyDebug ? QStringLiteral("true") : QStringLiteral("false")));
 
         QWebEngineScript script;
         script.setName("xmlhttprequest_quirks");
@@ -508,7 +511,8 @@ void WebView::injectXmlHttpRequestScripts()
         page()->scripts().insert(script);
 
         qDebug() << "[HbbTV] xmlhttprequest_quirks injected via QWebEngineScript";
-        qDebug() << "[OpenHbbTV] auth HTTP debug" << authHttpDebug << "hbbtv HTTP debug" << hbbtvHttpDebug;
+        qDebug() << "[OpenHbbTV] auth HTTP debug" << authHttpDebug << "hbbtv HTTP debug" << hbbtvHttpDebug
+                 << "hbbtv HTTP body debug" << hbbtvHttpBodyDebug;
     } else {
         qWarning() << "[HbbTV] xmlhttprequest_quirks.js not found in qrc";
     }

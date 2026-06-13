@@ -30,6 +30,10 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     return window.OPENHBBTV_HBBTV_HTTP_DEBUG === true;
   }
 
+  function hbbtvBodyDebugEnabled() {
+    return window.OPENHBBTV_HBBTV_HTTP_BODY_DEBUG === true;
+  }
+
   function shouldLogAuth(url) {
     url = String(url || "");
     return url.indexOf("accounts.ard.de/device/") >= 0 ||
@@ -64,7 +68,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     text = text.replace(/("token_uri"\s*:\s*"https:\/\/accounts\.ard\.de\/device\/token\/)([A-Z0-9]{5})\+[^"]+(")/g, "$1$2+***$3");
     text = text.replace(/("(?:access_token|refresh_token|id_token|accessToken|refreshToken|idToken|device_secret|deviceSecret|bearerToken|token|auth|authorization|session|sessionId|userId|userid)"\s*:\s*")[^"]+(")/gi, "$1***$2");
     text = text.replace(/([?&](?:token|auth|authorization|session|sessionId|userId|userid|key)=)[^&\s"'<>)]+/gi, "$1***");
-    return text.length > 900 ? text.slice(0, 900) + "..." : text;
+    return text.length > 420 ? text.slice(0, 420) + "..." : text;
   }
 
   function bodyText(body) {
@@ -94,19 +98,88 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     try {
       var value = JSON.parse(String(text || ""));
       var root = value && typeof value === "object" ? Object.keys(value).slice(0, 20).join(",") : typeof value;
-      var data = value && value.data && typeof value.data === "object" ? Object.keys(value.data).slice(0, 30).join(",") : "";
+      var dataObj = value && value.data && typeof value.data === "object" ? value.data : null;
+      var data = dataObj ? Object.keys(dataObj).slice(0, 15).join(",") : "";
       var errors = value && value.errors && value.errors.length !== undefined ? String(value.errors.length) : "";
-      return " jsonRoot=" + root + (data ? " dataKeys=" + data : "") + (errors ? " errors=" + errors : "");
+      var details = [];
+      if (dataObj) {
+        if (dataObj.menuItems !== undefined)
+          details.push("menuItemsLen=" + (dataObj.menuItems && dataObj.menuItems.length !== undefined ? dataObj.menuItems.length : typeof dataObj.menuItems));
+        if (dataObj.texts !== undefined)
+          details.push("textsKeys=" + (dataObj.texts && typeof dataObj.texts === "object" ? Object.keys(dataObj.texts).slice(0, 10).join("|") : typeof dataObj.texts));
+        if (dataObj.tracking !== undefined)
+          details.push("trackingKeys=" + (dataObj.tracking && typeof dataObj.tracking === "object" ? Object.keys(dataObj.tracking).join("|") : typeof dataObj.tracking));
+        if (dataObj.profileModal !== undefined)
+          details.push("profileModalType=" + typeof dataObj.profileModal);
+        if (dataObj.fsk !== undefined)
+          details.push("fskType=" + typeof dataObj.fsk);
+      }
+      if (value && value.oipfKnown !== undefined)
+        details.push("oipfKnown=" + value.oipfKnown);
+      if (value && value.dash !== undefined)
+        details.push("dash=" + value.dash);
+      if (value && value.dashJsInHbbtv !== undefined)
+        details.push("dashJsInHbbtv=" + value.dashJsInHbbtv);
+      if (value && value.dashVod !== undefined)
+        details.push("dashVod=" + value.dashVod);
+      if (value && value.liveRestart !== undefined)
+        details.push("liveRestart=" + value.liveRestart);
+      return " jsonRoot=" + root + (errors ? " errors=" + errors : "") + (details.length ? " " + details.join(" ") : "") + (data ? " dataKeys=" + data : "");
     } catch (ignore) {
       return "";
     }
   }
 
+  function responseDetail(label, url, body) {
+    var detail = summarizeJson(body);
+    if (label === "AUTHHTTP" || hbbtvBodyDebugEnabled())
+      detail += " body=" + body;
+    return detail;
+  }
+
   function log(label, message) {
     try {
-      if (window.signalopenhbbtvbrowser)
-        window.signalopenhbbtvbrowser("LOG:" + label + " " + mask(message));
+      var command = "LOG:" + label + " " + mask(message);
+      if (window.signalopenhbbtvbrowser) {
+        window.signalopenhbbtvbrowser(command);
+      } else if (document && document.title !== undefined) {
+        window.__openhbbtvEarlyLogSeq = (window.__openhbbtvEarlyLogSeq || 0) + 1;
+        document.title = "OPENATV_HBBTV:" + command + "||early" + window.__openhbbtvEarlyLogSeq;
+      }
     } catch (ignore) {}
+  }
+
+  function installChunkProbe(name) {
+    try {
+      var target = window[name];
+      if (!target || !target.__openhbbtvChunkProbeArray)
+        target = [];
+      var assignedPush = Array.prototype.push;
+      var wrappedPush = function(data) {
+        if (!data || !data[0] || !data[1]) {
+          log("HBBTVJS", "chunk push invalid name=" + name + " type=" + Object.prototype.toString.call(data) +
+              " value=" + String(data));
+        }
+        return assignedPush.apply(target, arguments);
+      };
+      Object.defineProperty(target, "push", {
+        configurable: true,
+        get: function() {
+          return wrappedPush;
+        },
+        set: function(fn) {
+          assignedPush = typeof fn === "function" ? fn : Array.prototype.push;
+        }
+      });
+      target.__openhbbtvChunkProbeArray = true;
+      window[name] = target;
+    } catch (error) {
+      log("HBBTVJS", "chunk probe install failed name=" + name + " error=" + error);
+    }
+  }
+
+  if (hbbtvDebugEnabled()) {
+    installChunkProbe("webpackChunk_tv_media_library_zdf_mediathek");
   }
 
   try {
@@ -132,7 +205,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
             log(label, "XHR " + xhr.__openhbbtvAuthMethod + " " + xhr.__openhbbtvAuthUrl +
                 " status=" + xhr.status + " responseURL=" + (xhr.responseURL || "") +
                 (requestBody ? " request=" + requestBody : "") +
-                summarizeJson(body) + " body=" + body);
+                responseDetail(label, xhr.__openhbbtvAuthUrl, body));
           });
         });
       }
@@ -163,7 +236,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
                       " status=" + response.status +
                       " responseURL=" + (response.url || "") +
                       (requestBody ? " request=" + requestBody : "") +
-                      summarizeJson(body) + " body=" + body);
+                      responseDetail(label, url, body));
                 });
               }).catch(function(error) {
                 labels.forEach(function(label) {
