@@ -42,6 +42,10 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     return window.OPENHBBTV_ZDF_BOOT_DEBUG === true;
   }
 
+  function zdfDeepProbeEnabled() {
+    return window.OPENHBBTV_ZDF_DEEP_PROBE === true;
+  }
+
   function isZdfPage() {
     try {
       var host = String((window.location && window.location.hostname) || "").toLowerCase();
@@ -165,6 +169,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
           " entriesProbe=" + !!(Object.entries && Object.entries.__openhbbtvZdfProbe) +
           " fromEntriesProbe=" + !!(Object.fromEntries && Object.fromEntries.__openhbbtvZdfProbe) +
           " mapProbe=" + !!(Array.prototype.map && Array.prototype.map.__openhbbtvZdfProbe) +
+          " deepProbe=" + zdfDeepProbeEnabled() +
           " allSettled=" + (window.Promise && Promise.allSettled ? typeof Promise.allSettled : "missing"));
       if (dataObj.texts && typeof dataObj.texts === "object")
         logPieces("ZDFINIT", "texts", Object.keys(dataObj.texts).join("|"));
@@ -188,7 +193,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
 
   function installZdfResponseTextProbe(url, response) {
     try {
-      if (!isZdfInitUrl(url) || !response || typeof response.text !== "function" ||
+      if (!zdfDeepProbeEnabled() || !isZdfInitUrl(url) || !response || typeof response.text !== "function" ||
           response.__openhbbtvZdfTextProbe)
         return;
       var originalText = response.text;
@@ -719,7 +724,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
   }
 
   function installZdfBootstrapProbe() {
-    if (!zdfBootDebugEnabled() || !isZdfPage())
+    if (!zdfBootDebugEnabled() || !zdfDeepProbeEnabled() || !isZdfPage())
       return;
 
     try {
@@ -844,7 +849,9 @@ window.cefXmlHttpRequestQuirk = function(uri) {
   function installChunkProbe(name) {
     try {
       var target = window[name];
-      if (!target || !target.__openhbbtvChunkProbeArray)
+      if (target && target.__openhbbtvChunkProbeArray)
+        return;
+      if (!target)
         target = [];
       var assignedPush = Array.prototype.push;
       var wrappedPush = function(data) {
@@ -870,7 +877,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     }
   }
 
-  if (hbbtvDebugEnabled()) {
+  if (hbbtvDebugEnabled() && zdfDeepProbeEnabled()) {
     installChunkProbe("webpackChunk_tv_media_library_zdf_mediathek");
   }
 

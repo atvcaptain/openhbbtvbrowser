@@ -497,18 +497,21 @@ void WebView::injectXmlHttpRequestScripts()
         const bool hbbtvHttpBodyDebug = openHbbTVEnvEnabled("OPENHBBTV_HBBTV_HTTP_BODY_DEBUG", false);
         const bool zdfConsoleDebug = openHbbTVEnvEnabled("OPENHBBTV_ZDF_CONSOLE_DEBUG", false);
         const bool zdfBootDebug = openHbbTVEnvEnabled("OPENHBBTV_ZDF_BOOT_DEBUG", false);
+        const bool zdfDeepProbe = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DEEP_PROBE", false);
         const bool apiAuditDebug = openHbbTVEnvEnabled("OPENHBBTV_API_AUDIT_DEBUG", false);
         source.prepend(QStringLiteral("window.OPENHBBTV_AUTH_HTTP_DEBUG=%1;\n"
                                       "window.OPENHBBTV_HBBTV_HTTP_DEBUG=%2;\n"
                                       "window.OPENHBBTV_HBBTV_HTTP_BODY_DEBUG=%3;\n"
                                       "window.OPENHBBTV_ZDF_CONSOLE_DEBUG=%4;\n"
                                       "window.OPENHBBTV_ZDF_BOOT_DEBUG=%5;\n"
-                                      "window.OPENHBBTV_API_AUDIT_DEBUG=%6;\n")
+                                      "window.OPENHBBTV_ZDF_DEEP_PROBE=%6;\n"
+                                      "window.OPENHBBTV_API_AUDIT_DEBUG=%7;\n")
                            .arg(authHttpDebug ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(hbbtvHttpDebug ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(hbbtvHttpBodyDebug ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(zdfConsoleDebug ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(zdfBootDebug ? QStringLiteral("true") : QStringLiteral("false"))
+                           .arg(zdfDeepProbe ? QStringLiteral("true") : QStringLiteral("false"))
                            .arg(apiAuditDebug ? QStringLiteral("true") : QStringLiteral("false")));
 
         QWebEngineScript script;
@@ -523,7 +526,8 @@ void WebView::injectXmlHttpRequestScripts()
         qDebug() << "[OpenHbbTV] auth HTTP debug" << authHttpDebug << "hbbtv HTTP debug" << hbbtvHttpDebug
                  << "hbbtv HTTP body debug" << hbbtvHttpBodyDebug
                  << "zdf console debug" << zdfConsoleDebug
-                 << "zdf boot debug" << zdfBootDebug;
+                 << "zdf boot debug" << zdfBootDebug
+                 << "zdf deep probe" << zdfDeepProbe;
     } else {
         qWarning() << "[HbbTV] xmlhttprequest_quirks.js not found in qrc";
     }
@@ -570,6 +574,7 @@ void WebView::setBroadcastInfo(const QString &json)
         return;
     }
     const QByteArray encoded = json.toUtf8().toBase64();
+    const bool applyBroadcastInfo = openHbbTVEnvEnabled("OPENHBBTV_BROADCAST_INFO_APPLY", false);
     QString s = QString::fromLatin1(
         "(function() {"
         "  window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};"
@@ -583,13 +588,15 @@ void WebView::setBroadcastInfo(const QString &json)
         "      window.HBBTV_POLYFILL_NS.currentChannel = info.channel;"
         "    }"
         "    window.HBBTV_POLYFILL_NS.broadcastProgrammes = info.programmes || [];"
-        "    if (typeof window.HBBTV_POLYFILL_NS.applyBroadcastInfo === 'function') {"
+        "    if (%2 && typeof window.HBBTV_POLYFILL_NS.applyBroadcastInfo === 'function') {"
         "      window.HBBTV_POLYFILL_NS.applyBroadcastInfo(info);"
         "    }"
         "  } catch (e) {"
         "    console.log('OpenHbbTV setBroadcastInfo failed', e);"
         "  }"
-        "})();").arg(QString::fromLatin1(encoded));
+        "})();")
+        .arg(QString::fromLatin1(encoded),
+             applyBroadcastInfo ? QStringLiteral("true") : QStringLiteral("false"));
     runJavaScriptWithWatchdog(QStringLiteral("setBroadcastInfo"), s);
 }
 
