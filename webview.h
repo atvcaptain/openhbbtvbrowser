@@ -117,6 +117,7 @@ private:
     void flushTeletextDigitBuffer();
     void beginTeletextReturn();
     void loadInitialUrlAfterTeletextReturn(int delayMs);
+    void resetPageForTeletextReturn();
     void refreshApplicationAfterTeletextReturn();
     void runJavaScriptWithWatchdog(const QString &label, const QString &script, int timeoutMs = 1200, bool recoverOnTimeout = false);
     void recordDiagnosticEvent(const QString &event);
@@ -141,6 +142,12 @@ private:
     bool isNavigationOrEnterKey(int keyCode) const;
     bool handleStreamKeyFallback(int keyCode);
     QUrl m_initialUrl;
+    QString m_hbbtvScriptSrc;
+    QString m_language;
+    QString m_scriptDebugging;
+    int m_currentOnid;
+    int m_currentTsid;
+    int m_currentSid;
     QString m_lastBroadcastInfo;
     int m_streamState;
     int m_streamError;

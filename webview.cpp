@@ -1,6 +1,7 @@
 #include "webview.h"
 #include "browsercontrol.h"
 #include "virtualkey.h"
+#include "webpage.h"
 #include <QApplication>
 #include <QByteArray>
 #include <QCursor>
@@ -11,6 +12,7 @@
 #include <QWebEngineScriptCollection>
 #include <QWebEngineHistory>
 #include <QWebEnginePage>
+#include <QWebEngineProfile>
 #include <QFileInfo>
 #include <QTimer>
 #include <QWidget>
@@ -123,6 +125,9 @@ WebView::WebView(QWidget *parent)
     , m_jsTimeoutRecoveryPending(false)
     , m_diagnosticSeq(0)
     , m_jsSeq(0)
+    , m_currentOnid(-1)
+    , m_currentTsid(-1)
+    , m_currentSid(-1)
     , m_teletextReturnInProgress(false)
     , m_teletextDigitTimer(new QTimer(this))
     , m_quitMsg(new QLabel)
@@ -415,6 +420,7 @@ void WebView::runJavaScriptWithWatchdog(const QString &label, const QString &scr
 
 void WebView::injectHbbTVScripts(const QString &src)
 {
+    m_hbbtvScriptSrc = src;
     QString normalized = src;
     if (normalized.startsWith("qrc:/")) {
         normalized.replace(0, 4, ":");   // "qrc:/foo.js" -> ":/foo.js"
@@ -485,6 +491,9 @@ void WebView::injectXmlHttpRequestScripts()
 
 void WebView::setCurrentChannel(const int &onid, const int &tsid, const int &sid)
 {
+    m_currentOnid = onid;
+    m_currentTsid = tsid;
+    m_currentSid = sid;
     QWebEngineScript script;
     recordDiagnosticEvent(QStringLiteral("setCurrentChannel %1,%2,%3").arg(onid).arg(tsid).arg(sid));
 
@@ -1034,6 +1043,7 @@ bool WebView::handleStreamKeyFallback(int keyCode)
 
 void WebView::setLanguage(const QString &language)
 {
+    m_language = language;
     QWebEngineScript script;
 
     QString s = QString::fromLatin1("(function() {"
@@ -1051,6 +1061,7 @@ void WebView::setLanguage(const QString &language)
 
 void WebView::setScriptDebugging(const QString &scriptDebugging)
 {
+    m_scriptDebugging = scriptDebugging;
     QWebEngineScript script;
 
     QString s = QString::fromLatin1("(function() {"
@@ -1115,6 +1126,42 @@ void WebView::loadInitialUrlAfterTeletextReturn(int delayMs)
     });
 }
 
+void WebView::resetPageForTeletextReturn()
+{
+    QWebEnginePage *oldPage = page();
+    QWebEngineProfile *profile = oldPage ? oldPage->profile() : Q_NULLPTR;
+    if (!profile) {
+        qWarning() << "[OpenHbbTV] teletext page reset skipped: no profile";
+        return;
+    }
+
+    qDebug() << "[OpenHbbTV] reset WebEngine page for teletext return"
+             << "oldPage" << oldPage
+             << "target" << m_teletextReturnUrl.toString();
+    if (oldPage) {
+        oldPage->disconnect(this);
+        oldPage->triggerAction(QWebEnginePage::Stop);
+    }
+
+    WebPage *newPage = new WebPage(profile, this);
+    setPage(newPage);
+    attachPageDiagnostics();
+    setCursor(Qt::BlankCursor);
+    show();
+
+    injectHbbTVScripts(m_hbbtvScriptSrc.isEmpty() ? QStringLiteral("qrc:/hbbtv_polyfill.js") : m_hbbtvScriptSrc);
+    injectXmlHttpRequestScripts();
+    if (m_currentOnid != -1 && m_currentTsid != -1 && m_currentSid != -1)
+        setCurrentChannel(m_currentOnid, m_currentTsid, m_currentSid);
+    if (!m_language.isEmpty())
+        setLanguage(m_language);
+    if (!m_scriptDebugging.isEmpty())
+        setScriptDebugging(m_scriptDebugging);
+
+    if (oldPage)
+        oldPage->deleteLater();
+}
+
 void WebView::beginTeletextReturn()
 {
     if (m_teletextReturnInProgress) {
@@ -1157,11 +1204,10 @@ void WebView::beginTeletextReturn()
                  << "backUrl" << backUrl.toString()
                  << "mode" << (returnMode.isEmpty() ? QStringLiteral("direct") : returnMode);
         recordDiagnosticEvent(QStringLiteral("teletext leading-zero direct-return ") + diagnosticSnippet(targetUrl.toString()));
-        if (page())
-            page()->triggerAction(QWebEnginePage::Stop);
         QTimer::singleShot(80, this, [this]() {
             if (!m_teletextReturnInProgress)
                 return;
+            resetPageForTeletextReturn();
             qDebug() << "[OpenHbbTV] load teletext direct return url" << m_teletextReturnUrl.toString();
             setUrl(m_teletextReturnUrl);
         });
