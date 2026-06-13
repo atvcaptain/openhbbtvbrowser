@@ -30815,11 +30815,14 @@ const hbbtvFn = function () {
     // 7.3.1  The application/oipfConfiguration embedded object --------------------
     window.oipfConfiguration = window.oipfConfiguration || {};
 
+    var preferredLanguage = window.HBBTV_POLYFILL_NS.preferredLanguage || 'DEU';
+    var preferredCountry = window.HBBTV_POLYFILL_NS.preferredCountry || 'DEU';
     oipfConfiguration.configuration = {};
-    oipfConfiguration.configuration.preferredAudioLanguage = window.HBBTV_POLYFILL_NS.preferredLanguage || 'ENG';
-    oipfConfiguration.configuration.preferredSubtitleLanguage = window.HBBTV_POLYFILL_NS.preferredLanguage || 'ENG,FRA';
-    oipfConfiguration.configuration.preferredUILanguage = window.HBBTV_POLYFILL_NS.preferredLanguage || 'ENG,FRA';
-    oipfConfiguration.configuration.countryId = window.HBBTV_POLYFILL_NS.preferredLanguage || 'ENG';
+    oipfConfiguration.configuration.preferredAudioLanguage = preferredLanguage;
+    oipfConfiguration.configuration.preferredSubtitleLanguage = preferredLanguage;
+    oipfConfiguration.configuration.preferredUILanguage = preferredLanguage;
+    oipfConfiguration.configuration.countryId = preferredCountry;
+    log('oipfConfiguration preferredLanguage=' + preferredLanguage + ' countryId=' + preferredCountry);
     //oipfConfiguration.configuration.regionId = 0;
     //oipfConfiguration.localSystem = {};
     oipfConfiguration.getText = function (key) {
@@ -31718,7 +31721,19 @@ class OipfVideoBroadcastMapper {
         positionMs = Number(positionMs);
         durationMs = Number(durationMs);
         var hasPosition = isFinite(positionMs) && positionMs >= 0;
-        var hasDuration = isFinite(durationMs) && durationMs >= 0;
+        var hasDuration = isFinite(durationMs) && durationMs > 0;
+        if (hasPosition && hasDuration && positionMs > durationMs + 30000) {
+            log('stream position sync ignored implausible pos=' + positionMs +
+                ' duration=' + durationMs +
+                ' reason=' + (options.reason || ''));
+            return;
+        }
+        if (hasPosition && !hasDuration && positionMs > 12 * 60 * 60 * 1000) {
+            log('stream position sync ignored unbounded pos=' + positionMs +
+                ' duration=' + (isFinite(durationMs) ? durationMs : -1) +
+                ' reason=' + (options.reason || ''));
+            return;
+        }
         var session = ns.openHbbtvMediaSession;
         if (session && session.state !== 'stopped') {
             if (hasPosition) {

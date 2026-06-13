@@ -12,6 +12,7 @@
 #include <QFileInfo>
 #include <QFileInfoList>
 #include <QLockFile>
+#include <QLocale>
 #include <QUrl>
 #include <QWebEngineSettings>
 #include <QWebEngineProfile>
@@ -119,8 +120,14 @@ int main(int argc, char *argv[])
     qputenv("QT_QPA_EGLFS_HIDECURSOR", QByteArrayLiteral("1"));
     installOpenHbbTVDebugLogger();
     qDebug() << "[OpenHbbTV] process start argc" << argc;
-    qDebug() << "[OpenHbbTV] process build id e2-rcu-owner-keybridge-v42-stream-position-sync-20260613";
+    qDebug() << "[OpenHbbTV] process build id e2-rcu-owner-keybridge-v43-stream-position-guard-20260613";
     qDebug() << "[OpenHbbTV] build mode e2-rcu-owner-stream-overlay-window";
+    QByteArray chromiumLang = qgetenv("OPENHBBTV_CHROMIUM_LANG").trimmed();
+    if (chromiumLang.isEmpty())
+        chromiumLang = QByteArrayLiteral("de-DE");
+    if (qgetenv("LANG").isEmpty())
+        qputenv("LANG", QByteArrayLiteral("de_DE.UTF-8"));
+    QLocale::setDefault(QLocale(QLocale::German, QLocale::Germany));
 #if defined(EMBEDDED_BUILD)
     HardwareProfile::applyEnvironment(argc, argv);
 
@@ -137,7 +144,8 @@ int main(int argc, char *argv[])
     QByteArrayList args = QByteArrayList()
             << QByteArrayLiteral("--disable-web-security")
             << QByteArrayLiteral("--no-sandbox")
-            << QByteArrayLiteral("--log-level=0");
+            << QByteArrayLiteral("--log-level=0")
+            << (QByteArrayLiteral("--lang=") + chromiumLang);
     const int count = args.size() + argc;
     QVector<char *> qargv(count);
 
@@ -151,6 +159,10 @@ int main(int argc, char *argv[])
 
     QApplication app(qAppArgCount, qargv.data());
     app.setOverrideCursor(QCursor(Qt::BlankCursor));
+    qDebug() << "[OpenHbbTV] locale"
+             << QLocale().name()
+             << "chromiumLang" << QString::fromLatin1(chromiumLang)
+             << "LANG" << QString::fromLocal8Bit(qgetenv("LANG"));
 
 #if defined(EMBEDDED_BUILD)
     QLockFile lockFile(QDir::tempPath() + "/openhbbtvbrowser.lock");

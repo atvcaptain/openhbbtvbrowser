@@ -1087,6 +1087,7 @@ void WebView::setLanguage(const QString &language)
     QString s = QString::fromLatin1("(function() {"
                                     "  window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};"
                                     "  window.HBBTV_POLYFILL_NS.preferredLanguage = '%1';"
+                                    "  window.HBBTV_POLYFILL_NS.preferredCountry = 'DEU';"
                                     "})();").arg(language);
 
     script.setName("preferred_language");
