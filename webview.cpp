@@ -16,9 +16,34 @@
 #include <QWidget>
 #include <QDateTime>
 #include <QCoreApplication>
+#include <QMetaEnum>
+#include <QMetaObject>
+#include <QMetaProperty>
 #include <QPointer>
 #include <QSharedPointer>
+#include <QtGlobal>
 #include <QVariant>
+
+static bool openHbbTVEnvEnabled(const char *name, bool defaultEnabled)
+{
+    const QString value = QString::fromLocal8Bit(qgetenv(name)).trimmed().toLower();
+    if (value.isEmpty())
+        return defaultEnabled;
+    return value == QStringLiteral("1") ||
+           value == QStringLiteral("yes") ||
+           value == QStringLiteral("true") ||
+           value == QStringLiteral("on") ||
+           value == QStringLiteral("enabled");
+}
+
+static int openHbbTVEnvInt(const char *name, int defaultValue, int minValue, int maxValue)
+{
+    bool ok = false;
+    const int value = QString::fromLocal8Bit(qgetenv(name)).trimmed().toInt(&ok);
+    if (!ok)
+        return defaultValue;
+    return qBound(minValue, value, maxValue);
+}
 
 WebView::WebView(QWidget *parent)
     : QWebEngineView(parent)
@@ -27,6 +52,8 @@ WebView::WebView(QWidget *parent)
     , m_streamOverlayVisible(true)
     , m_streamOverlayLowered(false)
     , m_silentPlayingStatePending(false)
+    , m_streamRendererFrozen(false)
+    , m_streamViewHiddenForPlayback(false)
     , m_streamOverlayHoldUntilMs(0)
     , m_streamOverlayGeometryValid(false)
     , m_jsTimeoutRecoveryPending(false)
@@ -77,6 +104,7 @@ void WebView::attachPageDiagnostics()
     if (!currentPage || m_diagnosticsPage == currentPage)
         return;
 
+    m_streamRendererFrozen = false;
     m_diagnosticsPage = currentPage;
     connect(currentPage, &QWebEnginePage::renderProcessTerminated, this,
             [this](QWebEnginePage::RenderProcessTerminationStatus status, int exitCode) {
@@ -85,6 +113,96 @@ void WebView::attachPageDiagnostics()
                 requestRestartApplicationOnce(QStringLiteral("render-process-terminated"));
             });
     qDebug() << "[OpenHbbTV] page diagnostics attached" << currentPage;
+}
+
+bool WebView::streamRendererFreezeEnabled() const
+{
+    return openHbbTVEnvEnabled("OPENHBBTV_STREAM_FREEZE_RENDERER", false);
+}
+
+bool WebView::streamRendererFreezeViewEnabled() const
+{
+    return openHbbTVEnvEnabled("OPENHBBTV_STREAM_FREEZE_VIEW", true);
+}
+
+bool WebView::streamRendererFreezeLifecycleEnabled() const
+{
+    return openHbbTVEnvEnabled("OPENHBBTV_STREAM_FREEZE_LIFECYCLE", true);
+}
+
+int WebView::streamRendererFreezeDelayMs() const
+{
+    return openHbbTVEnvInt("OPENHBBTV_STREAM_FREEZE_RENDERER_DELAY_MS", 2200, 0, 10000);
+}
+
+void WebView::scheduleStreamRendererFreeze(const QString &reason)
+{
+    if (!streamRendererFreezeEnabled())
+        return;
+
+    const int delayMs = streamRendererFreezeDelayMs();
+    qDebug() << "[OpenHbbTV] schedule stream renderer freeze" << delayMs << reason
+             << "state" << m_streamState << "overlayVisible" << m_streamOverlayVisible;
+    QTimer::singleShot(delayMs, this, [this, reason, delayMs]() {
+        if (m_streamState != 1 || m_streamOverlayVisible) {
+            qDebug() << "[OpenHbbTV] skip stream renderer freeze" << delayMs << reason
+                     << "state" << m_streamState << "overlayVisible" << m_streamOverlayVisible;
+            return;
+        }
+        setStreamRendererActive(false, QStringLiteral("scheduled ") + reason);
+    });
+}
+
+void WebView::setStreamRendererActive(bool active, const QString &reason)
+{
+    if (!streamRendererFreezeEnabled())
+        return;
+
+    QWebEnginePage *currentPage = page();
+    if (!currentPage)
+        return;
+
+    if (active && m_streamViewHiddenForPlayback) {
+        QWebEngineView::show();
+        m_streamViewHiddenForPlayback = false;
+        qDebug() << "[OpenHbbTV] show WebEngine view after stream freeze" << reason;
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
+    }
+
+    if (streamRendererFreezeLifecycleEnabled()) {
+        const QMetaObject *meta = currentPage->metaObject();
+        const int propertyIndex = meta ? meta->indexOfProperty("lifecycleState") : -1;
+        const int enumIndex = meta ? meta->indexOfEnumerator("LifecycleState") : -1;
+        if (propertyIndex >= 0 && enumIndex >= 0) {
+            const QMetaProperty property = meta->property(propertyIndex);
+            const QMetaEnum states = meta->enumerator(enumIndex);
+            const int stateValue = states.keyToValue(active ? "Active" : "Frozen");
+            if (property.isWritable() && stateValue >= 0) {
+                const bool ok = property.write(currentPage, QVariant(stateValue));
+                const QVariant actual = property.read(currentPage);
+                qDebug() << "[OpenHbbTV] stream renderer lifecycle"
+                         << (active ? "active" : "frozen") << "ok" << ok
+                         << "requested" << stateValue << "actual" << actual
+                         << reason;
+                if (ok)
+                    m_streamRendererFrozen = !active;
+            } else {
+                qDebug() << "[OpenHbbTV] stream renderer lifecycle unavailable"
+                         << "writable" << property.isWritable()
+                         << "stateValue" << stateValue << reason;
+            }
+        } else {
+            qDebug() << "[OpenHbbTV] stream renderer lifecycle property missing"
+                     << "property" << propertyIndex << "enum" << enumIndex << reason;
+        }
+    }
+
+    if (!active && streamRendererFreezeViewEnabled() && !m_streamViewHiddenForPlayback) {
+        QWebEngineView::hide();
+        m_streamViewHiddenForPlayback = true;
+        qDebug() << "[OpenHbbTV] hide WebEngine view during external E2 stream" << reason;
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
+    }
 }
 
 void WebView::requestRestartApplicationOnce(const QString &reason)
@@ -345,6 +463,8 @@ void WebView::retryStreamOverlayVisible(const QString &reason, int delayMs)
 
 void WebView::showApplicationOverlay(const QString &reason)
 {
+    setStreamRendererActive(true, QStringLiteral("show overlay ") + reason);
+
     const bool streamReason = isStreamActive() && reason.toLower().contains(QStringLiteral("stream"));
     const bool wasOverlayVisible = m_streamOverlayVisible;
     const bool wasOverlayLowered = m_streamOverlayLowered;
@@ -586,6 +706,8 @@ void WebView::setStreamState(int state, int error)
 {
     m_streamState = state;
     m_streamError = error;
+    if (state != 1)
+        setStreamRendererActive(true, QStringLiteral("stream state not playing"));
     const QString silentPlayingValue = QString::fromLocal8Bit(qgetenv("OPENHBBTV_STREAM_SILENT_PLAYING_STATE")).trimmed().toLower();
     const bool silentPlayingState = state == 1 && !m_streamOverlayVisible &&
         (silentPlayingValue == QStringLiteral("1") ||
@@ -622,6 +744,7 @@ void WebView::setStreamState(int state, int error)
         QTimer::singleShot(80, this, [this]() { hideApplicationOverlay(QStringLiteral("stream state playing auto hide 1")); });
         QTimer::singleShot(250, this, [this]() { hideApplicationOverlay(QStringLiteral("stream state playing auto hide 2")); });
         QTimer::singleShot(700, this, [this]() { hideApplicationOverlay(QStringLiteral("stream state playing auto hide 3")); });
+        scheduleStreamRendererFreeze(QStringLiteral("stream state playing"));
     } else if (state == 2) {
         showApplicationOverlay(QStringLiteral("stream state paused"));
     } else if (state == 0) {

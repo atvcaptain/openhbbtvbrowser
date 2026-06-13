@@ -95,6 +95,12 @@ private:
     void retryStreamOverlayVisible(const QString &reason, int delayMs);
     void syncDeferredStreamStateToApplication(const QString &reason);
     void requestRestartApplicationOnce(const QString &reason);
+    bool streamRendererFreezeEnabled() const;
+    bool streamRendererFreezeViewEnabled() const;
+    bool streamRendererFreezeLifecycleEnabled() const;
+    int streamRendererFreezeDelayMs() const;
+    void scheduleStreamRendererFreeze(const QString &reason);
+    void setStreamRendererActive(bool active, const QString &reason);
     bool isInitialUrl(const QUrl &candidate) const;
     void injectKeyEvent(int keyCode);
     bool nativeNavigationKeysEnabled() const;
@@ -107,6 +113,8 @@ private:
     bool m_streamOverlayVisible;
     bool m_streamOverlayLowered;
     bool m_silentPlayingStatePending;
+    bool m_streamRendererFrozen;
+    bool m_streamViewHiddenForPlayback;
     qint64 m_streamOverlayHoldUntilMs;
     QRect m_streamOverlaySavedGeometry;
     bool m_streamOverlayGeometryValid;
