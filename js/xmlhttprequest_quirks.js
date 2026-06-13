@@ -273,6 +273,383 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     } catch (ignore) {}
   }
 
+  function installEarlyVideoBroadcastShim() {
+    try {
+      if (!window.HTMLObjectElement || !HTMLObjectElement.prototype)
+        return;
+
+      var proto = HTMLObjectElement.prototype;
+      if (proto.__openhbbtvEarlyVideoBroadcastShim)
+        return;
+
+      function send(command) {
+        try {
+          if (window.signalopenhbbtvbrowser)
+            window.signalopenhbbtvbrowser(command);
+          else if (document && document.title !== undefined) {
+            window.__openhbbtvEarlyLogSeq = (window.__openhbbtvEarlyLogSeq || 0) + 1;
+            document.title = "OPENATV_HBBTV:" + command + "||early" + window.__openhbbtvEarlyLogSeq;
+          }
+        } catch (ignore) {}
+      }
+
+      function earlyBroadcastDebugEnabled() {
+        return hbbtvDebugEnabled() || zdfBootDebugEnabled() || window.OPENHBBTV_API_AUDIT_DEBUG === true;
+      }
+
+      function namespace() {
+        window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
+        return window.HBBTV_POLYFILL_NS;
+      }
+
+      function currentChannel() {
+        var ns = namespace();
+        ns.currentChannel = ns.currentChannel || {
+          onid: 1,
+          tsid: 1,
+          sid: 1,
+          ccid: "ccid:dvbt.1.1.1",
+          name: ""
+        };
+        return ns.currentChannel;
+      }
+
+      function makeCollection(items) {
+        items = items || [];
+        items.item = function(index) {
+          return index >= 0 && index < this.length ? this[index] : null;
+        };
+        return items;
+      }
+
+      function makeComponent(type) {
+        var component = {
+          COMPONENT_TYPE_VIDEO: 0,
+          COMPONENT_TYPE_AUDIO: 1,
+          COMPONENT_TYPE_SUBTITLE: 2,
+          componentTag: 0,
+          pid: undefined,
+          type: type,
+          encrypted: false
+        };
+        if (type === 0) {
+          component.aspectRatio = 1.78;
+        } else if (type === 1) {
+          component.language = "eng";
+          component.audioDescription = false;
+          component.audioChannels = 2;
+        } else if (type === 2) {
+          component.language = "deu";
+          component.hearingImpaired = false;
+          component.encoding = "DVB-SUBT";
+        }
+        return component;
+      }
+
+      function componentsFor(type) {
+        if (type === undefined || type === null)
+          return makeCollection([makeComponent(0), makeComponent(1), makeComponent(2)]);
+        type = Number(type);
+        if (type === 0 || type === 1 || type === 2)
+          return makeCollection([makeComponent(type)]);
+        return makeCollection([]);
+      }
+
+      function channelConfig() {
+        window.oipf = window.oipf || {};
+        var channel = currentChannel();
+        var list = makeCollection([channel]);
+        list.getChannel = function(ccid) {
+          return currentChannel().ccid === ccid ? currentChannel() : null;
+        };
+        list.getChannelByTriplet = function(onid, tsid, sid) {
+          var current = currentChannel();
+          return Number(current.onid) === Number(onid) &&
+                 Number(current.tsid) === Number(tsid) &&
+                 Number(current.sid) === Number(sid) ? current : null;
+        };
+        window.oipf.ChannelConfig = window.oipf.ChannelConfig || {};
+        window.oipf.ChannelConfig.channelList = list;
+        return window.oipf.ChannelConfig;
+      }
+
+      function defineConstant(obj, name, value) {
+        try {
+          if (obj[name] === undefined) {
+            Object.defineProperty(obj, name, {
+              configurable: true,
+              enumerable: true,
+              writable: true,
+              value: value
+            });
+          }
+        } catch (ignore) {
+          try { obj[name] = value; } catch (ignoreAssign) {}
+        }
+      }
+
+      function ensureBroadcastObject(obj) {
+        if (!obj)
+          return obj;
+        try {
+          defineConstant(obj, "COMPONENT_TYPE_VIDEO", 0);
+          defineConstant(obj, "COMPONENT_TYPE_AUDIO", 1);
+          defineConstant(obj, "COMPONENT_TYPE_SUBTITLE", 2);
+          if (typeof obj.playState !== "number")
+            obj.playState = 0;
+          obj.currentChannel = currentChannel();
+          if (obj.style)
+            obj.style.background = "transparent";
+        } catch (ignore) {}
+        return obj;
+      }
+
+      function isConnected(obj) {
+        try {
+          if (!obj)
+            return false;
+          if (obj.isConnected !== undefined)
+            return !!obj.isConnected;
+          return !!(obj.ownerDocument && obj.ownerDocument.documentElement &&
+                    obj.ownerDocument.documentElement.contains(obj));
+        } catch (ignore) {
+          return false;
+        }
+      }
+
+      function isVisible(obj) {
+        try {
+          var rect = obj.getBoundingClientRect();
+          var style = window.getComputedStyle ? window.getComputedStyle(obj) : null;
+          return rect && rect.width > 0 && rect.height > 0 &&
+                 (!style || (style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0"));
+        } catch (ignore) {
+          return false;
+        }
+      }
+
+      function reportVideoWindow(obj) {
+        try {
+          if (!isConnected(obj) || !isVisible(obj)) {
+            if (obj && obj.__openhbbtvEarlyBroadcastVisible) {
+              send("BROADCAST_HIDDEN");
+              send("UNSET_VIDEO_WINDOW");
+              obj.__openhbbtvEarlyBroadcastVisible = false;
+            }
+            return;
+          }
+          var rect = obj.getBoundingClientRect();
+          var payload = [
+            Math.round(rect.left),
+            Math.round(rect.top),
+            Math.round(rect.width),
+            Math.round(rect.height),
+            window.innerWidth || document.documentElement.clientWidth || 1280,
+            window.innerHeight || document.documentElement.clientHeight || 720
+          ].join(",");
+          if (payload !== obj.__openhbbtvEarlyBroadcastRect) {
+            send("SET_VIDEO_WINDOW:" + payload);
+            obj.__openhbbtvEarlyBroadcastRect = payload;
+          }
+          obj.__openhbbtvEarlyBroadcastVisible = true;
+        } catch (ignore) {}
+      }
+
+      function dispatchPlayState(obj, state) {
+        try {
+          ensureBroadcastObject(obj);
+          obj.playState = state;
+          if (typeof obj.onPlayStateChange === "function")
+            obj.onPlayStateChange(state);
+          if (typeof obj.dispatchEvent === "function") {
+            var event = document.createEvent ? document.createEvent("Event") : new Event("PlayStateChange");
+            if (event.initEvent)
+              event.initEvent("PlayStateChange", false, false);
+            event.state = state;
+            obj.dispatchEvent(event);
+          }
+        } catch (ignore) {}
+      }
+
+      function installMethod(name, fn) {
+        if (typeof proto[name] === "function" && !proto[name].__openhbbtvEarlyVideoBroadcastShim)
+          return;
+        Object.defineProperty(proto, name, {
+          configurable: true,
+          writable: true,
+          value: fn
+        });
+        proto[name].__openhbbtvEarlyVideoBroadcastShim = true;
+      }
+
+      installMethod("createChannelObject", function() {
+        ensureBroadcastObject(this);
+        return currentChannel();
+      });
+      installMethod("bindToCurrentChannel", function() {
+        ensureBroadcastObject(this);
+        reportVideoWindow(this);
+        send("BROADCAST_PLAY");
+        dispatchPlayState(this, 1);
+        if (hbbtvDebugEnabled() || zdfBootDebugEnabled())
+          log("HBBTVEARLY", "videoBroadcast.bindToCurrentChannel handled");
+        return currentChannel();
+      });
+      installMethod("setChannel", function(channel) {
+        ensureBroadcastObject(this);
+        if (channel) {
+          namespace().currentChannel = channel;
+          this.currentChannel = channel;
+          send("SET_CHANNEL:" + JSON.stringify({
+            onid: channel.onid,
+            tsid: channel.tsid,
+            sid: channel.sid,
+            ccid: channel.ccid || ""
+          }));
+        }
+        reportVideoWindow(this);
+        return true;
+      });
+      installMethod("prevChannel", function() {
+        ensureBroadcastObject(this);
+        send("PREV_CHANNEL");
+        return currentChannel();
+      });
+      installMethod("nextChannel", function() {
+        ensureBroadcastObject(this);
+        send("NEXT_CHANNEL");
+        return currentChannel();
+      });
+      installMethod("stop", function() {
+        ensureBroadcastObject(this);
+        namespace().lastBroadcastStopAt = Date.now ? Date.now() : (new Date()).getTime();
+        send("BROADCAST_STOP");
+        send("UNSET_VIDEO_WINDOW");
+        dispatchPlayState(this, 0);
+        return true;
+      });
+      installMethod("release", function() {
+        ensureBroadcastObject(this);
+        namespace().lastBroadcastStopAt = Date.now ? Date.now() : (new Date()).getTime();
+        send("BROADCAST_STOP");
+        send("UNSET_VIDEO_WINDOW");
+        dispatchPlayState(this, 0);
+        return true;
+      });
+      installMethod("getChannelConfig", function() {
+        ensureBroadcastObject(this);
+        return channelConfig();
+      });
+      installMethod("getComponents", function(type) {
+        ensureBroadcastObject(this);
+        return componentsFor(type);
+      });
+      installMethod("getCurrentActiveComponents", function(type) {
+        ensureBroadcastObject(this);
+        return componentsFor(type);
+      });
+      installMethod("selectComponent", function() {
+        ensureBroadcastObject(this);
+        return true;
+      });
+      installMethod("unselectComponent", function() {
+        ensureBroadcastObject(this);
+        return true;
+      });
+      installMethod("setFullScreen", function(state) {
+        ensureBroadcastObject(this);
+        try {
+          if (state) {
+            this.style.position = "fixed";
+            this.style.left = "0px";
+            this.style.top = "0px";
+            this.style.width = "100vw";
+            this.style.height = "100vh";
+            reportVideoWindow(this);
+            send("BROADCAST_PLAY");
+          } else {
+            send("BROADCAST_HIDDEN");
+          }
+          if (typeof this.onFullScreenChange === "function")
+            this.onFullScreenChange(state);
+        } catch (ignore) {}
+        return true;
+      });
+      installMethod("addStreamEventListener", function(url, eventName, listener) {
+        var ns = namespace();
+        ns.streamEventListeners = ns.streamEventListeners || [];
+        ns.streamEventListeners.push({ url: url, eventName: eventName, listener: listener });
+        return true;
+      });
+      installMethod("removeStreamEventListener", function(url, eventName, listener) {
+        var ns = namespace();
+        var listeners = ns.streamEventListeners || [];
+        for (var i = listeners.length - 1; i >= 0; i--) {
+          if (listeners[i].url === url && listeners[i].eventName === eventName && listeners[i].listener === listener)
+            listeners.splice(i, 1);
+        }
+        return true;
+      });
+
+      Object.defineProperty(proto, "__openhbbtvEarlyVideoBroadcastShim", {
+        configurable: true,
+        value: true
+      });
+
+      function looksLikeBroadcastObject(node) {
+        try {
+          if (!node || String(node.tagName || "").toUpperCase() !== "OBJECT")
+            return false;
+          var type = String(node.type || node.getAttribute("type") || "").toLowerCase();
+          return node.id === "videoBroadcast" || type.indexOf("video/broadcast") === 0;
+        } catch (ignore) {
+          return false;
+        }
+      }
+
+      function scan(root) {
+        try {
+          if (looksLikeBroadcastObject(root))
+            ensureBroadcastObject(root);
+          if (root && typeof root.querySelectorAll === "function") {
+            var nodes = root.querySelectorAll("object");
+            for (var i = 0; i < nodes.length; i++) {
+              if (looksLikeBroadcastObject(nodes[i]))
+                ensureBroadcastObject(nodes[i]);
+            }
+          }
+        } catch (ignore) {}
+      }
+
+      scan(document.documentElement);
+      if (window.MutationObserver && document.documentElement) {
+        var observer = new MutationObserver(function(mutations) {
+          for (var i = 0; i < mutations.length; i++) {
+            var mutation = mutations[i];
+            if (mutation.type === "childList") {
+              for (var j = 0; j < mutation.addedNodes.length; j++)
+                scan(mutation.addedNodes[j]);
+            } else if (mutation.type === "attributes") {
+              scan(mutation.target);
+            }
+          }
+        });
+        observer.observe(document.documentElement, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ["id", "type", "style", "class"]
+        });
+      }
+
+      if (earlyBroadcastDebugEnabled())
+        log("HBBTVEARLY", "video/broadcast prototype shim installed");
+    } catch (error) {
+      if (hbbtvDebugEnabled() || zdfBootDebugEnabled() || window.OPENHBBTV_API_AUDIT_DEBUG === true)
+        log("HBBTVEARLY", "video/broadcast shim failed " + stackText(error));
+    }
+  }
+
   function installZdfConsoleFlag() {
     if (!zdfConsoleDebugEnabled() || !isZdfPage())
       return;
@@ -456,6 +833,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
   }
 
   try {
+    installEarlyVideoBroadcastShim();
     installZdfConsoleFlag();
     installZdfConsoleBridge();
     installZdfBootstrapProbe();

@@ -31596,7 +31596,7 @@ class OipfVideoBroadcastMapper {
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo bindToCurrentChannel() via Enigma2 ...');
             reportVideoWindow();
             send("BROADCAST_PLAY");
-            dispatchPlayState(2);
+            dispatchPlayState(1);
             return currentChannel;
         };
 
@@ -31773,18 +31773,34 @@ class OipfVideoBroadcastMapper {
                 super(num);
             }
             item(idx) {
-                return idx < this.length ? this[idx] : [];
+                return idx < this.length ? this[idx] : null;
             }
         }
+        function makeAVComponentCollection(items) {
+            var collection = new AVComponentCollection();
+            items.forEach(function (item) {
+                collection.push(item);
+            });
+            return collection;
+        }
         oipfPluginObject.getComponents = (function (type) {
-            return [
-                type === this.COMPONENT_TYPE_VIDEO ? new AVVideoComponent() :
-                    type === this.COMPONENT_TYPE_AUDIO ? new AVAudioComponent() :
-                        type === this.COMPONENT_TYPE_SUBTITLE ? new AVSubtitleComponent() : null
-            ];
+            if (type === undefined || type === null) {
+                return makeAVComponentCollection([new AVVideoComponent(), new AVAudioComponent(), new AVSubtitleComponent()]);
+            }
+            type = Number(type);
+            if (type === this.COMPONENT_TYPE_VIDEO) {
+                return makeAVComponentCollection([new AVVideoComponent()]);
+            }
+            if (type === this.COMPONENT_TYPE_AUDIO) {
+                return makeAVComponentCollection([new AVAudioComponent()]);
+            }
+            if (type === this.COMPONENT_TYPE_SUBTITLE) {
+                return makeAVComponentCollection([new AVSubtitleComponent()]);
+            }
+            return makeAVComponentCollection([]);
         }).bind(oipfPluginObject);
         // TODO: read those values from a message to the extension (+ using a dedicated worker to retrieve those values from the TS file inside broadcast_url form field)
-        oipfPluginObject.getCurrentActiveComponents = (function () { return [new AVVideoComponent(), new AVAudioComponent(), new AVSubtitleComponent()]; }).bind(oipfPluginObject);
+        oipfPluginObject.getCurrentActiveComponents = (function (type) { return this.getComponents(type); }).bind(oipfPluginObject);
         oipfPluginObject.selectComponent = (function (cpt) { return true; }).bind(oipfPluginObject);
         oipfPluginObject.unselectComponent = (function (cpt) { return true; }).bind(oipfPluginObject);
         oipfPluginObject.setFullScreen = (function (state) {
