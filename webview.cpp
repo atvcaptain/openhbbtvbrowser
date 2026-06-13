@@ -964,9 +964,12 @@ void WebView::setStreamState(int state, int error)
         m_silentPlayingStatePending = false;
     const bool skipVisibleStopStateJs = state == 0 && wasOverlayVisible &&
         openHbbTVEnvEnabled("OPENHBBTV_STREAM_SKIP_VISIBLE_STOP_STATE_JS", true);
+    const bool skipHiddenPlayingStateJs = state == 1 && !m_streamOverlayVisible &&
+        openHbbTVEnvEnabled("OPENHBBTV_STREAM_SKIP_HIDDEN_PLAYING_STATE_JS", true);
     qDebug() << "[OpenHbbTV] setStreamState" << state << error
              << "overlayVisible" << m_streamOverlayVisible
              << "silentPlayingEvent" << silentPlayingState
+             << "skipHiddenPlayingStateJs" << skipHiddenPlayingStateJs
              << "skipVisibleStopStateJs" << skipVisibleStopStateJs;
     QString s = QString::fromLatin1("(function() {"
                                     "  window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};"
@@ -976,7 +979,9 @@ void WebView::setStreamState(int state, int error)
                                     "    window.HBBTV_POLYFILL_NS.pendingStreamState = [%1, %2%3];"
                                     "  }"
                                     "})();").arg(state).arg(error).arg(streamStateOptions);
-    if (skipVisibleStopStateJs) {
+    if (skipHiddenPlayingStateJs) {
+        qDebug() << "[OpenHbbTV] skip hidden stream playing state JS; E2 owns external playback";
+    } else if (skipVisibleStopStateJs) {
         qDebug() << "[OpenHbbTV] skip visible stream stop state JS; overlay already visible";
     } else {
         runJavaScriptWithWatchdog(QStringLiteral("setStreamState %1,%2").arg(state).arg(error), s);
