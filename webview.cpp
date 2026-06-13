@@ -795,6 +795,11 @@ void WebView::hideApplicationDocumentForPlayback(const QString &reason)
         qDebug() << "[OpenHbbTV] stream document hide disabled" << reason;
         return;
     }
+    if (openHbbTVEnvEnabled("OPENHBBTV_STREAM_SKIP_DOCUMENT_HIDE_JS", true)) {
+        qDebug() << "[OpenHbbTV] skip stream document hide JS; E2 owns external playback" << reason
+                 << "wasHidden" << m_streamDocumentHiddenForPlayback;
+        return;
+    }
     if (m_streamDocumentHiddenForPlayback) {
         qDebug() << "[OpenHbbTV] skip duplicate stream document hide" << reason;
         return;
