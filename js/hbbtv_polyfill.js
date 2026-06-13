@@ -30243,6 +30243,7 @@ class OipfAVControlMapper {
         };
         this.avControlObject.seek = (posInMs) => {
             this.avControlObject.playPosition = posInMs;
+            trace("seek(" + posInMs + ") -> SEEK_STREAM");
             send("SEEK_STREAM:" + posInMs);
             var playerEvent = new Event('PlayPositionChanged');
             playerEvent.position = posInMs;
@@ -31698,6 +31699,101 @@ class OipfVideoBroadcastMapper {
         return 'id=' + session.id + ' state=' + session.state + ' source=' + session.source + ' url=' + session.url;
     }
 
+    function activeMediaSessionForElement(element) {
+        var session = ns.openHbbtvMediaSession;
+        if (!session || session.state === 'stopped') {
+            return null;
+        }
+        try {
+            if (element && element.__openhbbtvE2SessionId && element.__openhbbtvE2SessionId !== session.id) {
+                return null;
+            }
+        } catch (ignore) {
+        }
+        return session;
+    }
+
+    ns.setStreamPosition = function (positionMs, durationMs, options) {
+        options = options || {};
+        positionMs = Number(positionMs);
+        durationMs = Number(durationMs);
+        var hasPosition = isFinite(positionMs) && positionMs >= 0;
+        var hasDuration = isFinite(durationMs) && durationMs >= 0;
+        var session = ns.openHbbtvMediaSession;
+        if (session && session.state !== 'stopped') {
+            if (hasPosition) {
+                session.positionMs = positionMs;
+            }
+            if (hasDuration) {
+                session.durationMs = durationMs;
+            }
+            session.lastPositionSyncAt = Date.now();
+        }
+
+        var objects = ns.avControlObjects || [];
+        var connectedObjects = 0;
+        objects.forEach(function (obj) {
+            if (!obj || !obj.isConnected) {
+                return;
+            }
+            connectedObjects += 1;
+            if (hasPosition) {
+                obj.playPosition = positionMs;
+                try {
+                    if (typeof obj.onPlayPositionChanged === 'function') {
+                        obj.onPlayPositionChanged(positionMs);
+                    } else if (typeof obj.PlayPositionChanged === 'function') {
+                        obj.PlayPositionChanged(positionMs);
+                    }
+                } catch (ignoreCallback) {
+                }
+                try {
+                    var playerEvent = new Event('PlayPositionChanged');
+                    playerEvent.position = positionMs;
+                    obj.dispatchEvent(playerEvent);
+                } catch (ignoreEvent) {
+                }
+            }
+            if (hasDuration) {
+                obj.playTime = durationMs;
+            }
+        });
+
+        var videos = [];
+        try {
+            videos = document.querySelectorAll ? Array.prototype.slice.call(document.querySelectorAll('video')) : [];
+        } catch (ignoreVideos) {
+        }
+        videos.forEach(function (video) {
+            var videoSession = activeMediaSessionForElement(video);
+            if (!videoSession) {
+                return;
+            }
+            try {
+                if (hasDuration) {
+                    video.dispatchEvent(new Event('durationchange'));
+                }
+                if (hasPosition) {
+                    video.dispatchEvent(new Event('timeupdate'));
+                }
+            } catch (ignoreVideoEvent) {
+            }
+        });
+
+        log('stream position sync pos=' + (hasPosition ? positionMs : -1) +
+            ' duration=' + (hasDuration ? durationMs : -1) +
+            ' objects=' + connectedObjects +
+            ' videos=' + videos.length +
+            ' reason=' + (options.reason || ''));
+    };
+    if (ns.pendingStreamPosition) {
+        try {
+            ns.setStreamPosition(ns.pendingStreamPosition[0], ns.pendingStreamPosition[1], ns.pendingStreamPosition[2] || { reason: 'pending' });
+        } catch (ignorePendingPosition) {
+        }
+        ns.pendingStreamPosition = null;
+    }
+
     function isActiveMediaSwitch(url) {
         url = absoluteUrl(url || '');
         var session = ns.openHbbtvMediaSession;
@@ -31724,6 +31820,12 @@ class OipfVideoBroadcastMapper {
         if (session && sameMediaUrl(session.url, url) && session.state !== 'stopped') {
             session.lastSeenAt = now;
             session.lastReason = reason || session.lastReason || '';
+            try {
+                if (video) {
+                    video.__openhbbtvE2SessionId = session.id;
+                }
+            } catch (ignoreVideoSession) {
+            }
             log('reuse media session ' + mediaSessionSummary(session) + ' reason=' + reason);
             blockNativeVideo(video, reason + ' reuse-session');
             return true;
@@ -31738,6 +31840,12 @@ class OipfVideoBroadcastMapper {
             lastSeenAt: now,
             lastReason: reason || ''
         };
+        try {
+            if (video) {
+                video.__openhbbtvE2SessionId = session.id;
+            }
+        } catch (ignoreVideoSession) {
+        }
         ns.openHbbtvMediaSession = session;
         ns.html5VodLastRoutedUrl = url;
         ns.html5VodLastRoutedAt = now;
@@ -32115,6 +32223,8 @@ class OipfVideoBroadcastMapper {
         var nativeLoad = mediaProto.load;
         var nativeSetAttribute = window.Element && window.Element.prototype && window.Element.prototype.setAttribute;
         var srcDescriptor = Object.getOwnPropertyDescriptor(mediaProto, 'src');
+        var currentTimeDescriptor = Object.getOwnPropertyDescriptor(mediaProto, 'currentTime');
+        var durationDescriptor = Object.getOwnPropertyDescriptor(mediaProto, 'duration');
         if (nativeSetAttribute && !ns.html5VodNativeSetAttribute) {
             ns.html5VodNativeSetAttribute = nativeSetAttribute;
         }
@@ -32178,6 +32288,63 @@ class OipfVideoBroadcastMapper {
                 });
             } catch (error) {
                 log('video.src patch failed error=' + error);
+            }
+        }
+
+        if (currentTimeDescriptor && currentTimeDescriptor.set && currentTimeDescriptor.get) {
+            try {
+                Object.defineProperty(mediaProto, 'currentTime', {
+                    enumerable: currentTimeDescriptor.enumerable,
+                    configurable: true,
+                    get: function () {
+                        if (this.tagName && String(this.tagName).toLowerCase() === 'video') {
+                            var session = activeMediaSessionForElement(this);
+                            if (session && isFinite(session.positionMs) && session.positionMs >= 0) {
+                                return session.positionMs / 1000;
+                            }
+                        }
+                        return currentTimeDescriptor.get.call(this);
+                    },
+                    set: function (value) {
+                        if (this.tagName && String(this.tagName).toLowerCase() === 'video') {
+                            var session = activeMediaSessionForElement(this);
+                            var seconds = Number(value);
+                            if (session && isFinite(seconds) && seconds >= 0) {
+                                var positionMs = Math.max(0, Math.floor(seconds * 1000));
+                                session.positionMs = positionMs;
+                                log('video.currentTime seek pos=' + positionMs + ' session=' + mediaSessionSummary(session));
+                                send('SEEK_STREAM:' + positionMs);
+                                ns.setStreamPosition(positionMs, isFinite(session.durationMs) ? session.durationMs : -1, { reason: 'video.currentTime setter' });
+                                return;
+                            }
+                        }
+                        return currentTimeDescriptor.set.call(this, value);
+                    }
+                });
+                log('video.currentTime external E2 bridge installed');
+            } catch (error) {
+                log('video.currentTime patch failed error=' + error);
+            }
+        }
+
+        if (durationDescriptor && durationDescriptor.get) {
+            try {
+                Object.defineProperty(mediaProto, 'duration', {
+                    enumerable: durationDescriptor.enumerable,
+                    configurable: true,
+                    get: function () {
+                        if (this.tagName && String(this.tagName).toLowerCase() === 'video') {
+                            var session = activeMediaSessionForElement(this);
+                            if (session && isFinite(session.durationMs) && session.durationMs >= 0) {
+                                return session.durationMs / 1000;
+                            }
+                        }
+                        return durationDescriptor.get.call(this);
+                    }
+                });
+                log('video.duration external E2 bridge installed');
+            } catch (error) {
+                log('video.duration patch failed error=' + error);
             }
         }
 

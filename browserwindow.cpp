@@ -25,8 +25,8 @@ BrowserWindow::BrowserWindow(QWidget *parent, Qt::WindowFlags flags)
     connect(m_webView, &WebView::hbbtvCommand, this, &BrowserWindow::sendHbbtvCommand);
     connect(m_commandClient, &CommandClient::commandReceived, this, &BrowserWindow::onBackendCommand);
     qDebug() << "[OpenHbbTV] BrowserWindow created";
-    qDebug() << "[OpenHbbTV] build id e2-rcu-owner-keybridge-v41-teletext-isolated-page-return-20260613";
-    qDebug() << "[OpenHbbTV] backend command support OPEN_URL SET_CHANNEL BROADCAST_INFO SHOW_APPLICATION HIDE_APPLICATION INJECT_KEY SET_STREAM_STATE QUIT";
+    qDebug() << "[OpenHbbTV] build id e2-rcu-owner-keybridge-v42-stream-position-sync-20260613";
+    qDebug() << "[OpenHbbTV] backend command support OPEN_URL SET_CHANNEL BROADCAST_INFO SHOW_APPLICATION HIDE_APPLICATION INJECT_KEY SET_STREAM_STATE SET_STREAM_POSITION QUIT";
 }
 
 void BrowserWindow::showEvent(QShowEvent *event)
@@ -103,6 +103,13 @@ void BrowserWindow::onBackendCommand(int command, const QString &data)
         int state = parts.value(0).toInt();
         int error = parts.size() > 1 ? parts.value(1).toInt() : -1;
         m_webView->setStreamState(state, error);
+        break;
+    }
+    case CommandClient::CommandSetStreamPosition: {
+        QStringList parts = data.split(QLatin1Char(','));
+        qint64 positionMs = parts.value(0).toLongLong();
+        qint64 durationMs = parts.size() > 1 ? parts.value(1).toLongLong() : -1;
+        m_webView->setStreamPosition(positionMs, durationMs);
         break;
     }
     case CommandClient::CommandQuit:

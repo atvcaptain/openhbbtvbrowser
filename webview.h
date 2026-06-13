@@ -88,6 +88,7 @@ public:
     void setCurrentChannel(const int &onid, const int &tsid, const int &sid);
     void setBroadcastInfo(const QString &json);
     void setStreamState(int state, int error);
+    void setStreamPosition(qint64 positionMs, qint64 durationMs);
     void showApplicationOverlay(const QString &reason = QString());
     void hideApplicationOverlay(const QString &reason = QString());
     bool isStreamActive() const;

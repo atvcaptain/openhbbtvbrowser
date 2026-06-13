@@ -1004,6 +1004,23 @@ void WebView::setStreamState(int state, int error)
     }
 }
 
+void WebView::setStreamPosition(qint64 positionMs, qint64 durationMs)
+{
+    qDebug() << "[OpenHbbTV] setStreamPosition" << positionMs << durationMs
+             << "streamState" << m_streamState
+             << "overlayVisible" << m_streamOverlayVisible;
+    recordDiagnosticEvent(QStringLiteral("setStreamPosition %1,%2").arg(positionMs).arg(durationMs));
+    QString s = QString::fromLatin1("(function() {"
+                                    "  window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};"
+                                    "  if (typeof window.HBBTV_POLYFILL_NS.setStreamPosition === 'function') {"
+                                    "    window.HBBTV_POLYFILL_NS.setStreamPosition(%1, %2, { reason: 'e2-position-sync' });"
+                                    "  } else {"
+                                    "    window.HBBTV_POLYFILL_NS.pendingStreamPosition = [%1, %2, { reason: 'e2-position-sync' }];"
+                                    "  }"
+                                    "})();").arg(positionMs).arg(durationMs);
+    runJavaScriptWithWatchdog(QStringLiteral("setStreamPosition %1,%2").arg(positionMs).arg(durationMs), s, 800);
+}
+
 bool WebView::isStreamActive() const
 {
     return m_streamState == 1 || m_streamState == 2;
