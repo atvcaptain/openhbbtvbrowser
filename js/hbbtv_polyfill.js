@@ -30164,6 +30164,12 @@ class OipfAVControlMapper {
             ns.lastPlayStreamAt = Date.now();
             ns.lastPlayStreamUrl = streamUrl || '';
             clearAutoStartTimer();
+            try {
+                if (window.__openatvHbbtvSendTimelineHint) {
+                    window.__openatvHbbtvSendTimelineHint("avcontrol-play-" + (reason || ""));
+                }
+            } catch (ignoreTimelineHint) {
+            }
             send("LOG:AVControl PLAY_STREAM requested " + reason);
         };
 
@@ -30252,6 +30258,12 @@ class OipfAVControlMapper {
         };
         this.avControlObject.seek = (posInMs) => {
             this.avControlObject.playPosition = posInMs;
+            try {
+                if (window.__openatvHbbtvSendTimelineHint) {
+                    window.__openatvHbbtvSendTimelineHint("avcontrol-seek-" + posInMs);
+                }
+            } catch (ignoreTimelineHint) {
+            }
             trace("seek(" + posInMs + ") -> SEEK_STREAM");
             send("SEEK_STREAM:" + posInMs);
             var playerEvent = new Event('PlayPositionChanged');
@@ -31094,6 +31106,236 @@ function init() {
             startTime: Number(selected.startTime || 0),
             name: selected.name || ''
         };
+    };
+    window.__openatvHbbtvDebugElement = window.__openatvHbbtvDebugElement || function (element) {
+        try {
+            if (!element) {
+                return "null";
+            }
+            var tag = element.tagName || element.nodeName || typeof element;
+            var id = element.id ? ("#" + element.id) : "";
+            var cls = element.className ? ("." + String(element.className).replace(/\s+/g, ".").slice(0, 80)) : "";
+            return tag + id + cls;
+        } catch (ignore) {
+            return "unknown";
+        }
+    };
+    window.__openatvHbbtvTimelineHint = function (reason) {
+        try {
+            var ns = window.HBBTV_POLYFILL_NS || {};
+            var info = ns.broadcastInfo || {};
+            var nowSeconds = Number(info.timestamp || 0);
+            if (nowSeconds > 0 && ns.broadcastInfoReceivedAt && Date.now) {
+                nowSeconds += Math.max(0, Date.now() - Number(ns.broadcastInfoReceivedAt || 0)) / 1000;
+            }
+            if (!(nowSeconds > 0) && Date.now) {
+                nowSeconds = Date.now() / 1000;
+            }
+            var candidates = [];
+            var active = document.activeElement;
+            function normalText(value) {
+                return String(value || "").replace(/\s+/g, " ").trim();
+            }
+            function elementText(element) {
+                if (!element) {
+                    return "";
+                }
+                var parts = [];
+                ["aria-label", "title", "data-time", "data-start", "data-starttime", "datetime"].forEach(function (name) {
+                    try {
+                        var value = element.getAttribute && element.getAttribute(name);
+                        if (value) {
+                            parts.push(value);
+                        }
+                    } catch (ignoreAttr) {
+                    }
+                });
+                try {
+                    if (element.innerText) {
+                        parts.push(element.innerText);
+                    } else if (element.textContent) {
+                        parts.push(element.textContent);
+                    }
+                } catch (ignoreText) {
+                }
+                return normalText(parts.join(" "));
+            }
+            function absoluteStartFromTime(hour, minute) {
+                var base = new Date(nowSeconds * 1000);
+                var startDate = new Date(base.getTime());
+                startDate.setHours(hour, minute, 0, 0);
+                if (startDate.getTime() / 1000 > nowSeconds + 7200) {
+                    startDate.setDate(startDate.getDate() - 1);
+                }
+                return Math.floor(startDate.getTime() / 1000);
+            }
+            function pushTimeCandidate(start, timeLabel, source, priority, element, text, order) {
+                if (!(start > 0)) {
+                    return;
+                }
+                candidates.push({
+                    start: start,
+                    time: timeLabel || "",
+                    source: source,
+                    priority: priority,
+                    order: order || 0,
+                    text: normalText(text).slice(0, 180),
+                    element: window.__openatvHbbtvDebugElement(element)
+                });
+            }
+            function pushCandidatesFromText(text, source, priority, element) {
+                text = normalText(text);
+                if (!text) {
+                    return;
+                }
+                if (text.length > 5000) {
+                    text = text.slice(0, 5000);
+                }
+                var epochRegex = /\b(1[6-9]\d{8,9}|[2-9]\d{9})\b/g;
+                var epochMatch;
+                var epochCount = 0;
+                while ((epochMatch = epochRegex.exec(text)) && epochCount < 8) {
+                    epochCount += 1;
+                    var epoch = Number(epochMatch[1]);
+                    if (epoch > 100000000000) {
+                        epoch = Math.floor(epoch / 1000);
+                    }
+                    if (epoch > 1000000000 && epoch <= nowSeconds + 7200 && nowSeconds - epoch <= 12 * 60 * 60) {
+                        pushTimeCandidate(epoch, "", source, priority - 1, element, text.slice(Math.max(0, epochMatch.index - 60), epochMatch.index + 100), epochMatch.index);
+                    }
+                }
+                var regex = /\b([01]?\d|2[0-3])[:.]([0-5]\d)\b/g;
+                var match;
+                var count = 0;
+                while ((match = regex.exec(text)) && count < 20) {
+                    count += 1;
+                    var hour = Number(match[1]);
+                    var minute = Number(match[2]);
+                    if (!isFinite(hour) || !isFinite(minute)) {
+                        continue;
+                    }
+                    var start = absoluteStartFromTime(hour, minute);
+                    var label = (hour < 10 ? "0" : "") + hour + ":" + (minute < 10 ? "0" : "") + minute;
+                    var context = text.slice(Math.max(0, match.index - 70), Math.min(text.length, match.index + 130));
+                    pushTimeCandidate(start, label, source, priority, element, context, match.index);
+                }
+            }
+            function pushElement(element, source, priority) {
+                if (!element || element === document.body || element === document.documentElement) {
+                    return;
+                }
+                pushCandidatesFromText(elementText(element), source, priority, element);
+            }
+            var node = active;
+            var depth = 0;
+            while (node && depth < 6) {
+                pushElement(node, "active-ancestor", depth);
+                node = node.parentElement;
+                depth += 1;
+            }
+            try {
+                var selector = '[aria-selected="true"],[aria-current="true"],[tabindex="0"],.focused,.focus,.active,.selected,[class*="focus"],[class*="selected"],[class*="active"]';
+                Array.prototype.slice.call(document.querySelectorAll(selector), 0, 80).forEach(function (element) {
+                    pushElement(element, "selected", 2);
+                });
+            } catch (ignoreQuery) {
+            }
+            try {
+                pushCandidatesFromText(document.body && (document.body.innerText || document.body.textContent), "body-text", 9, document.body);
+            } catch (ignoreBody) {
+            }
+            var seen = {};
+            candidates = candidates.filter(function (item) {
+                var key = item.start + "|" + item.source + "|" + item.element + "|" + item.text;
+                if (seen[key]) {
+                    return false;
+                }
+                seen[key] = true;
+                return true;
+            });
+            candidates.sort(function (left, right) {
+                if (left.priority !== right.priority) {
+                    return left.priority - right.priority;
+                }
+                if (left.source !== right.source) {
+                    if (left.source === "body-text") {
+                        return 1;
+                    }
+                    if (right.source === "body-text") {
+                        return -1;
+                    }
+                }
+                return Math.abs(nowSeconds - left.start) - Math.abs(nowSeconds - right.start);
+            });
+            var debugCandidates = candidates.slice(0, 6).map(function (item) {
+                return item.time + " p" + item.priority + " " + item.source + " " + item.element + " " + item.text.slice(0, 80);
+            }).join(" || ");
+            var eligible = candidates.filter(function (item) {
+                return item.source !== "body-text";
+            });
+            if (!eligible.length) {
+                return {
+                    found: false,
+                    active: window.__openatvHbbtvDebugElement(active),
+                    candidates: debugCandidates,
+                    reason: reason || ""
+                };
+            }
+            var best = eligible[0];
+            best.found = true;
+            best.reason = reason || "";
+            best.active = window.__openatvHbbtvDebugElement(active);
+            best.candidates = debugCandidates;
+            return best;
+        } catch (error) {
+            return {
+                found: false,
+                error: String(error && error.message || error),
+                active: window.__openatvHbbtvDebugElement(document.activeElement),
+                candidates: "",
+                reason: reason || ""
+            };
+        }
+    };
+    window.__openatvHbbtvSendTimelineHint = function (reason) {
+        try {
+            window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
+            var ns = window.HBBTV_POLYFILL_NS;
+            var nowMs = Date.now ? Date.now() : (new Date()).getTime();
+            var hint = window.__openatvHbbtvTimelineHint(reason);
+            var cached = ns.lastReplayTimelineHint || null;
+            var cachedFresh = !!(cached && cached.cachedAt && (nowMs - Number(cached.cachedAt || 0)) < 15000);
+            var mediaReason = /^(avcontrol|video-currentTime)/.test(String(reason || ""));
+            if (hint && hint.found) {
+                hint.cachedAt = nowMs;
+                ns.lastReplayTimelineHint = Object.assign({}, hint);
+            } else if (mediaReason && cachedFresh) {
+                hint = Object.assign({}, cached, {
+                    found: true,
+                    cached: true,
+                    reason: reason || ""
+                });
+            }
+            if (hint && hint.found) {
+                window.signalopenhbbtvbrowser("LOG:ReplayTimelineHint reason=" + encodeURIComponent(reason || "") +
+                    " start=" + hint.start +
+                    " time=" + encodeURIComponent(hint.time || "") +
+                    " source=" + encodeURIComponent(hint.source || "") +
+                    " cached=" + (hint.cached ? "1" : "0") +
+                    " text=" + encodeURIComponent(hint.text || "") +
+                    " element=" + encodeURIComponent(hint.element || ""));
+            }
+            if (hint) {
+                window.signalopenhbbtvbrowser("LOG:TimelineDebug reason=" + encodeURIComponent(reason || "") +
+                    " found=" + (hint.found ? "1" : "0") +
+                    " active=" + encodeURIComponent(hint.active || "") +
+                    " candidates=" + encodeURIComponent(hint.candidates || "") +
+                    (hint.error ? (" error=" + encodeURIComponent(hint.error)) : ""));
+            }
+            return hint;
+        } catch (ignore) {
+            return null;
+        }
     };
 
     // set body position
@@ -32712,6 +32954,18 @@ class OipfVideoBroadcastMapper {
             catch (e2) { send('LOG:InjectedKey keyup failed target=' + describe(target) + ' error=' + e2); }
         }, 25);
         send('LOG:InjectedKey broker v4 target=' + describe(target) + ' active=' + describe(document.activeElement) + ' key=' + code + ' vk=' + (vkName || '') + ' eventKey=' + key + ' accepted=' + (!!downResult) + ' handlers=' + handlerSummary() + ' keyset=' + keysetSummary());
+        if (code === 37 || code === 38 || code === 39 || code === 40 || code === 13) {
+            [90, 240].forEach(function(delay) {
+                window.setTimeout(function() {
+                    try {
+                        if (window.__openatvHbbtvSendTimelineHint) {
+                            window.__openatvHbbtvSendTimelineHint('key-' + key + '-' + code + '-' + delay);
+                        }
+                    } catch (ignoreTimelineHint) {
+                    }
+                }, delay);
+            });
+        }
     }
     window.__openhbbtvInjectKey = function (code, vkName) {
         var resolved = resolveCode(code, vkName);
