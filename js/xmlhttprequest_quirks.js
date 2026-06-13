@@ -50,6 +50,10 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     return window.OPENHBBTV_ZDF_BOOT_TRACE === true;
   }
 
+  function zdfSafeInitFetchEnabled() {
+    return window.OPENHBBTV_ZDF_SAFE_INIT_FETCH === true;
+  }
+
   function zdfDeepProbeEnabled() {
     return window.OPENHBBTV_ZDF_DEEP_PROBE === true;
   }
@@ -1071,6 +1075,110 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     }
   }
 
+  function installZdfSafeInitFetch() {
+    if (!zdfSafeInitFetchEnabled() || !isZdfPage() || window.__openhbbtvZdfSafeInitFetchLoopInstalled)
+      return;
+
+    function copyResponseProperty(target, source, key) {
+      try {
+        target[key] = source[key];
+      } catch (ignore) {}
+    }
+
+    function makeSafeInitResponse(response, body, url) {
+      var safe = {};
+      copyResponseProperty(safe, response, "headers");
+      copyResponseProperty(safe, response, "ok");
+      copyResponseProperty(safe, response, "redirected");
+      copyResponseProperty(safe, response, "status");
+      copyResponseProperty(safe, response, "statusText");
+      copyResponseProperty(safe, response, "type");
+      copyResponseProperty(safe, response, "url");
+      safe.text = function() {
+        zdfTrace("safe init text delivered", "url=" + url + " len=" + String(body || "").length);
+        return Promise.resolve(body);
+      };
+      safe.json = function() {
+        return Promise.resolve(JSON.parse(String(body || "")));
+      };
+      safe.clone = function() {
+        return makeSafeInitResponse(response, body, url);
+      };
+      return safe;
+    }
+
+    function wrapFetch() {
+      try {
+        if (typeof window.fetch !== "function" || window.fetch.__openhbbtvZdfSafeInitFetch)
+          return;
+        var originalFetch = window.fetch;
+        var wrappedFetch = function(input, init) {
+          var url = "";
+          try {
+            url = typeof input === "string" ? input : (input && input.url) || "";
+          } catch (ignore) {}
+          if (!isZdfInitUrl(url))
+            return originalFetch.apply(this, arguments);
+
+          zdfTrace("safe init fetch begin", "url=" + url);
+          var result;
+          try {
+            result = originalFetch.apply(this, arguments);
+          } catch (error) {
+            zdfTrace("safe init fetch threw", "url=" + url + " error=" + stackText(error));
+            throw error;
+          }
+
+          return Promise.resolve(result).then(function(response) {
+            zdfTrace("safe init fetch response",
+                "url=" + url +
+                " status=" + (response && response.status) +
+                " ok=" + (response && response.ok) +
+                " text=" + (response && typeof response.text));
+            if (!response || typeof response.text !== "function")
+              return response;
+            var textResult;
+            try {
+              textResult = response.text();
+            } catch (error) {
+              zdfTrace("safe init text threw", "url=" + url + " error=" + stackText(error));
+              throw error;
+            }
+            return Promise.resolve(textResult).then(function(body) {
+              var text = String(body || "");
+              zdfTrace("safe init text cached",
+                  "url=" + url +
+                  " len=" + text.length +
+                  summarizeJson(text));
+              logZdfInitDetails(url, text);
+              return makeSafeInitResponse(response, text, url);
+            }, function(error) {
+              zdfTrace("safe init text rejected", "url=" + url + " error=" + stackText(error));
+              throw error;
+            });
+          }, function(error) {
+            zdfTrace("safe init fetch rejected", "url=" + url + " error=" + stackText(error));
+            throw error;
+          });
+        };
+        wrappedFetch.__openhbbtvZdfSafeInitFetch = true;
+        wrappedFetch.__openhbbtvOriginalFetch = originalFetch;
+        window.fetch = wrappedFetch;
+        zdfTrace("safe init fetch wrapped", "fetch=" + describeValue(originalFetch));
+      } catch (error) {
+        zdfTrace("safe init fetch wrap failed", stackText(error));
+      }
+    }
+
+    window.__openhbbtvZdfSafeInitFetchLoopInstalled = true;
+    wrapFetch();
+    setTimeout(wrapFetch, 0);
+    setTimeout(wrapFetch, 50);
+    setTimeout(wrapFetch, 250);
+    setTimeout(wrapFetch, 1000);
+    setTimeout(wrapFetch, 2000);
+  }
+
   function stringifyConsoleArg(arg) {
     try {
       if (arg instanceof Error)
@@ -1235,6 +1343,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
   try {
     installZdfStableObjectEntries();
     installZdfBootTrace();
+    installZdfSafeInitFetch();
     installEarlyVideoBroadcastShim();
     installZdfConsoleFlag();
     installZdfConsoleBridge();

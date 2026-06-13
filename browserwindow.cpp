@@ -25,7 +25,7 @@ BrowserWindow::BrowserWindow(QWidget *parent, Qt::WindowFlags flags)
     connect(m_webView, &WebView::hbbtvCommand, this, &BrowserWindow::sendHbbtvCommand);
     connect(m_commandClient, &CommandClient::commandReceived, this, &BrowserWindow::onBackendCommand);
     qDebug() << "[OpenHbbTV] BrowserWindow created";
-    qDebug() << "[OpenHbbTV] build id e2-rcu-owner-v56-zdf-boot-trace-20260613";
+    qDebug() << "[OpenHbbTV] build id e2-rcu-owner-v57-zdf-safe-init-fetch-20260613";
     qDebug() << "[OpenHbbTV] backend command support OPEN_URL SET_CHANNEL BROADCAST_INFO SHOW_APPLICATION HIDE_APPLICATION INJECT_KEY SET_STREAM_STATE SET_STREAM_POSITION QUIT";
 }
 

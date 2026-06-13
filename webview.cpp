@@ -508,6 +508,7 @@ void WebView::injectXmlHttpRequestScripts()
         const bool zdfStableObjectEntries = openHbbTVEnvEnabled("OPENHBBTV_ZDF_STABLE_OBJECT_ENTRIES", true);
         const bool zdfConsoleQuery = openHbbTVEnvEnabled("OPENHBBTV_ZDF_CONSOLE_QUERY", false);
         const bool zdfBootTrace = openHbbTVEnvEnabled("OPENHBBTV_ZDF_BOOT_TRACE", false);
+        const bool zdfSafeInitFetch = openHbbTVEnvEnabled("OPENHBBTV_ZDF_SAFE_INIT_FETCH", false);
         source.prepend(QStringLiteral("window.OPENHBBTV_AUTH_HTTP_DEBUG=%1;\n"
                                       "window.OPENHBBTV_HBBTV_HTTP_DEBUG=%2;\n"
                                       "window.OPENHBBTV_HBBTV_HTTP_BODY_DEBUG=%3;\n"
@@ -532,6 +533,8 @@ void WebView::injectXmlHttpRequestScripts()
                            .arg(zdfConsoleQuery ? QStringLiteral("true") : QStringLiteral("false")));
         source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_BOOT_TRACE=%1;\n")
                            .arg(zdfBootTrace ? QStringLiteral("true") : QStringLiteral("false")));
+        source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_SAFE_INIT_FETCH=%1;\n")
+                           .arg(zdfSafeInitFetch ? QStringLiteral("true") : QStringLiteral("false")));
 
         QWebEngineScript script;
         script.setName("xmlhttprequest_quirks");
@@ -551,6 +554,7 @@ void WebView::injectXmlHttpRequestScripts()
                  << "zdf init detail debug" << zdfInitDetailDebug
                  << "zdf console query" << zdfConsoleQuery
                  << "zdf boot trace" << zdfBootTrace
+                 << "zdf safe init fetch" << zdfSafeInitFetch
                  << "zdf stable object entries" << zdfStableObjectEntries;
     } else {
         qWarning() << "[HbbTV] xmlhttprequest_quirks.js not found in qrc";
