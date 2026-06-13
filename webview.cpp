@@ -21,6 +21,7 @@
 #include <QMetaProperty>
 #include <QPointer>
 #include <QSharedPointer>
+#include <QStringList>
 #include <QtGlobal>
 #include <QVariant>
 
@@ -43,6 +44,69 @@ static int openHbbTVEnvInt(const char *name, int defaultValue, int minValue, int
     if (!ok)
         return defaultValue;
     return qBound(minValue, value, maxValue);
+}
+
+std::atomic_bool OpenHbbTVRequestInterceptor::s_externalPlaybackActive(false);
+
+void OpenHbbTVRequestInterceptor::setExternalPlaybackActive(bool active)
+{
+    const bool previous = s_externalPlaybackActive.exchange(active);
+    if (previous != active)
+        qDebug() << "[OpenHbbTV] external playback request guard" << active;
+}
+
+bool OpenHbbTVRequestInterceptor::externalPlaybackActive()
+{
+    return s_externalPlaybackActive.load();
+}
+
+bool OpenHbbTVRequestInterceptor::shouldBlockExternalPlaybackRequest(
+    const QUrl &requestUrl,
+    QWebEngineUrlRequestInfo::ResourceType type)
+{
+    Q_UNUSED(type);
+
+    if (!openHbbTVEnvEnabled("OPENHBBTV_STREAM_BLOCK_BACKGROUND", false))
+        return false;
+
+    const QString scheme = requestUrl.scheme().toLower();
+    if (scheme != QStringLiteral("http") && scheme != QStringLiteral("https"))
+        return false;
+
+    const QString host = requestUrl.host().toLower();
+    if (host.isEmpty())
+        return false;
+
+    QString blockedHosts = QString::fromLocal8Bit(qgetenv("OPENHBBTV_STREAM_BLOCKED_HOSTS")).trimmed().toLower();
+    if (blockedHosts.isEmpty())
+        blockedHosts = QStringLiteral("nmrodam.com");
+
+    blockedHosts.replace(QLatin1Char(';'), QLatin1Char(','));
+    blockedHosts.replace(QLatin1Char(' '), QLatin1Char(','));
+    blockedHosts.replace(QLatin1Char('\n'), QLatin1Char(','));
+    blockedHosts.replace(QLatin1Char('\t'), QLatin1Char(','));
+
+    const QStringList entries = blockedHosts.split(QLatin1Char(','), QString::SkipEmptyParts);
+    for (QString entry : entries) {
+        entry = entry.trimmed();
+        if (entry.isEmpty())
+            continue;
+        if (entry.startsWith(QStringLiteral("*.")))
+            entry.remove(0, 1);
+
+        if (entry.startsWith(QLatin1Char('.'))) {
+            const QString bare = entry.mid(1);
+            if (host == bare || host.endsWith(entry))
+                return true;
+            continue;
+        }
+
+        const QString subdomainSuffix = QStringLiteral(".") + entry;
+        if (host == entry || host.endsWith(subdomainSuffix))
+            return true;
+    }
+
+    return false;
 }
 
 WebView::WebView(QWidget *parent)
@@ -72,6 +136,8 @@ WebView::WebView(QWidget *parent)
     int y = (screenGeometry.height() - m_quitMsg->height()) / 2;
     m_quitMsg->setGeometry(x, y, 480, 120);
     m_quitMsg->hide();
+
+    OpenHbbTVRequestInterceptor::setExternalPlaybackActive(false);
 
     setCursor(Qt::BlankCursor);
     setMouseTracking(false);
@@ -162,10 +228,10 @@ void WebView::setStreamRendererActive(bool active, const QString &reason)
     if (!currentPage)
         return;
 
-    if (active && m_streamViewHiddenForPlayback) {
-        QWebEngineView::show();
-        m_streamViewHiddenForPlayback = false;
-        qDebug() << "[OpenHbbTV] show WebEngine view after stream freeze" << reason;
+    if (!active && streamRendererFreezeViewEnabled() && !m_streamViewHiddenForPlayback) {
+        QWebEngineView::hide();
+        m_streamViewHiddenForPlayback = true;
+        qDebug() << "[OpenHbbTV] hide WebEngine view during external E2 stream" << reason;
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
     }
 
@@ -180,12 +246,22 @@ void WebView::setStreamRendererActive(bool active, const QString &reason)
             if (property.isWritable() && stateValue >= 0) {
                 const bool ok = property.write(currentPage, QVariant(stateValue));
                 const QVariant actual = property.read(currentPage);
+                bool actualOk = false;
+                const int actualValue = actual.toInt(&actualOk);
                 qDebug() << "[OpenHbbTV] stream renderer lifecycle"
                          << (active ? "active" : "frozen") << "ok" << ok
                          << "requested" << stateValue << "actual" << actual
                          << reason;
-                if (ok)
+                if (ok && actualOk && actualValue == stateValue) {
                     m_streamRendererFrozen = !active;
+                } else {
+                    qWarning() << "[OpenHbbTV] stream renderer lifecycle transition did not stick"
+                               << "active" << active << "ok" << ok
+                               << "requested" << stateValue << "actual" << actual
+                               << reason;
+                    if (active)
+                        m_streamRendererFrozen = false;
+                }
             } else {
                 qDebug() << "[OpenHbbTV] stream renderer lifecycle unavailable"
                          << "writable" << property.isWritable()
@@ -197,10 +273,10 @@ void WebView::setStreamRendererActive(bool active, const QString &reason)
         }
     }
 
-    if (!active && streamRendererFreezeViewEnabled() && !m_streamViewHiddenForPlayback) {
-        QWebEngineView::hide();
-        m_streamViewHiddenForPlayback = true;
-        qDebug() << "[OpenHbbTV] hide WebEngine view during external E2 stream" << reason;
+    if (active && m_streamViewHiddenForPlayback) {
+        QWebEngineView::show();
+        m_streamViewHiddenForPlayback = false;
+        qDebug() << "[OpenHbbTV] show WebEngine view after stream freeze" << reason;
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 20);
     }
 }
@@ -706,6 +782,7 @@ void WebView::setStreamState(int state, int error)
 {
     m_streamState = state;
     m_streamError = error;
+    OpenHbbTVRequestInterceptor::setExternalPlaybackActive(state == 1 || state == 2);
     if (state != 1)
         setStreamRendererActive(true, QStringLiteral("stream state not playing"));
     const QString silentPlayingValue = QString::fromLocal8Bit(qgetenv("OPENHBBTV_STREAM_SILENT_PLAYING_STATE")).trimmed().toLower();
@@ -1144,6 +1221,7 @@ void WebView::dispatchHbbtvBridgeCommand(const QString &rawCommand)
     qDebug() << "[OpenHbbTV] normalized bridge command" << command;
 
     if (command == QStringLiteral("BROADCAST_PLAY")) {
+        OpenHbbTVRequestInterceptor::setExternalPlaybackActive(false);
         emit hbbtvCommand(CommandClient::CommandBroadcastPlay, QString());
     } else if (command == QStringLiteral("BROADCAST_STOP")) {
         emit hbbtvCommand(CommandClient::CommandBroadcastStop, QString());
@@ -1159,9 +1237,11 @@ void WebView::dispatchHbbtvBridgeCommand(const QString &rawCommand)
         // external stream and sends HIDE_APPLICATION / SET_STREAM_STATE back.
         // Hiding immediately here breaks ARD live-stream transitions because the
         // browser is lowered before the application finished building the player.
+        OpenHbbTVRequestInterceptor::setExternalPlaybackActive(true);
         qDebug() << "[OpenHbbTV] forward PLAY_STREAM to backend and wait for backend hide/state";
         emit hbbtvCommand(CommandClient::CommandPlayStream, command.mid(12));
     } else if (command == QStringLiteral("STOP_STREAM")) {
+        OpenHbbTVRequestInterceptor::setExternalPlaybackActive(false);
         emit hbbtvCommand(CommandClient::CommandStopStream, QString());
     } else if (command == QStringLiteral("PAUSE_STREAM")) {
         emit hbbtvCommand(CommandClient::CommandPauseStream, QString());
@@ -1170,6 +1250,7 @@ void WebView::dispatchHbbtvBridgeCommand(const QString &rawCommand)
     } else if (command.startsWith(QStringLiteral("CREATE_APPLICATION:"))) {
         emit hbbtvCommand(CommandClient::CommandCreateApplication, command.mid(19));
     } else if (command == QStringLiteral("RESTORE_BROADCAST")) {
+        OpenHbbTVRequestInterceptor::setExternalPlaybackActive(false);
         emit hbbtvCommand(CommandClient::CommandRestoreBroadcast, QString());
     } else if (command.startsWith(QStringLiteral("SET_CHANNEL:"))) {
         emit hbbtvCommand(CommandClient::CommandSetChannel, command.mid(12));

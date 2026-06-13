@@ -8,6 +8,7 @@
 #include <QTimer>
 #include <QRect>
 #include <QPointer>
+#include <atomic>
 
 class QWebEnginePage;
 
@@ -35,6 +36,15 @@ public:
             return;
         }
 
+        if (externalPlaybackActive() && shouldBlockExternalPlaybackRequest(requestUrl, type)) {
+            qWarning().noquote() << "[OpenHbbTV] blocked external playback background request"
+                                 << info.requestMethod()
+                                 << type
+                                 << url;
+            info.block(true);
+            return;
+        }
+
         if (m_logRequests) {
             qDebug().noquote() << "[NET] Request:"
                                << info.requestMethod()
@@ -43,7 +53,12 @@ public:
         }
     }
 
+    static void setExternalPlaybackActive(bool active);
+    static bool externalPlaybackActive();
+
 private:
+    static bool shouldBlockExternalPlaybackRequest(const QUrl &requestUrl, QWebEngineUrlRequestInfo::ResourceType type);
+    static std::atomic_bool s_externalPlaybackActive;
     bool m_logRequests;
 };
 
