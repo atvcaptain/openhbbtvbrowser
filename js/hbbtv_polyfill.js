@@ -31047,6 +31047,24 @@ function init() {
     window.signalopenhbbtvbrowser('LOG:OpenHbbTV navigator.userAgent=' + navigator.userAgent);
     window.signalopenhbbtvbrowser('LOG:OpenHbbTV navigator.platform=' + navigator.platform + ' language=' + navigator.language);
     window.signalopenhbbtvbrowser('LOG:OpenHbbTV capability policy: no +DL no +DRM');
+    window.__openatvHbbtvLogViewport = function(reason) {
+        try {
+            var de = document.documentElement || {};
+            var body = document.body || {};
+            var screenObj = window.screen || {};
+            window.signalopenhbbtvbrowser('LOG:Viewport ' + reason +
+                ' inner=' + (window.innerWidth || 0) + 'x' + (window.innerHeight || 0) +
+                ' client=' + (de.clientWidth || 0) + 'x' + (de.clientHeight || 0) +
+                ' body=' + (body.clientWidth || 0) + 'x' + (body.clientHeight || 0) +
+                ' screen=' + (screenObj.width || 0) + 'x' + (screenObj.height || 0) +
+                ' dpr=' + (window.devicePixelRatio || 1));
+        } catch (ignore) {
+        }
+    };
+    window.__openatvHbbtvLogViewport('init');
+    window.addEventListener('resize', function() {
+        window.__openatvHbbtvLogViewport('resize');
+    }, false);
 
     // intercept XMLHttpRequest
     let cefOldXHROpen = window.XMLHttpRequest.prototype.open;
@@ -31138,6 +31156,9 @@ function init() {
     document.body.style.position = "absolute";
     document.body.style.width = "1280px";
     document.body.style.height = "720px";
+    if (window.__openatvHbbtvLogViewport) {
+        window.__openatvHbbtvLogViewport('body-layout');
+    }
 
     Object(_keyevent_init_js__WEBPACK_IMPORTED_MODULE_0__["keyEventInit"])();
     Object(_hbbtv_js__WEBPACK_IMPORTED_MODULE_1__["hbbtvFn"])();
@@ -31276,11 +31297,41 @@ class OipfVideoBroadcastMapper {
         };
         let lastRect = '';
         let lastVisible = undefined;
+        let pendingRect = '';
+        let pendingRectTimer = 0;
+        const clearPendingVideoWindow = () => {
+            if (pendingRectTimer) {
+                clearTimeout(pendingRectTimer);
+                pendingRectTimer = 0;
+            }
+            pendingRect = '';
+        };
+        const flushVideoWindow = () => {
+            pendingRectTimer = 0;
+            var payload = pendingRect;
+            pendingRect = '';
+            if (!payload) {
+                return;
+            }
+            if (payload !== lastRect || lastVisible !== true) {
+                send("SET_VIDEO_WINDOW:" + payload);
+                lastRect = payload;
+                lastVisible = true;
+            }
+        };
+        const scheduleVideoWindow = (payload) => {
+            pendingRect = payload;
+            if (!pendingRectTimer) {
+                pendingRectTimer = setTimeout(flushVideoWindow, 120);
+            }
+        };
         const reportVideoWindow = () => {
             if (!document.body || !oipfPluginObject.isConnected) {
+                clearPendingVideoWindow();
                 return;
             }
             if (!isVisible()) {
+                clearPendingVideoWindow();
                 if (lastVisible !== false) {
                     send("BROADCAST_HIDDEN");
                     send("UNSET_VIDEO_WINDOW");
@@ -31299,9 +31350,7 @@ class OipfVideoBroadcastMapper {
                 window.innerHeight || document.documentElement.clientHeight || 720
             ].join(',');
             if (payload !== lastRect || lastVisible !== true) {
-                send("SET_VIDEO_WINDOW:" + payload);
-                lastRect = payload;
-                lastVisible = true;
+                scheduleVideoWindow(payload);
             }
         };
         const startVideoWindowObserver = () => {

@@ -273,8 +273,12 @@ bool CommandClient::writeCommand(int command, const QString &data)
     if (m_socket->state() == QLocalSocket::UnconnectedState)
         m_socket->connectToServer(m_socket->serverName());
 
-    if (!m_socket->waitForConnected(1000) && !m_socket->isValid()) {
+    if (m_socket->state() == QLocalSocket::ConnectingState && !m_socket->waitForConnected(100)) {
         qWarning() << "[OpenHbbTV] IPC write failed, not connected" << command << m_socket->errorString();
+        return false;
+    }
+    if (m_socket->state() != QLocalSocket::ConnectedState) {
+        qWarning() << "[OpenHbbTV] IPC write failed, invalid state" << command << m_socket->state() << m_socket->errorString();
         return false;
     }
 
@@ -296,8 +300,8 @@ bool CommandClient::writeCommand(int command, const QString &data)
         return false;
     }
 
-    const bool written = m_socket->waitForBytesWritten(1000);
-    if (!written)
-        qWarning() << "[OpenHbbTV] IPC waitForBytesWritten timeout" << command << m_socket->errorString();
-    return written;
+    // Keep the Qt GUI/WebEngine thread responsive; QLocalSocket will drain the
+    // queued bytes through its notifier once control returns to the event loop.
+    m_socket->flush();
+    return true;
 }
