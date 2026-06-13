@@ -30647,13 +30647,14 @@ const hbbtvFn = function () {
 
     window.oipfObjectFactory.isObjectSupported = function (mimeType) {
         window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: isObjectSupported(' + mimeType + ') ...');
-        return mimeType === 'video/broadcast' ||
-            mimeType === 'video/mpeg' ||
-            mimeType === 'application/oipfApplicationManager' ||
-            mimeType === 'application/oipfCapabilities' ||
-            mimeType === 'application/oipfConfiguration' ||
-            mimeType === 'application/oipfParentalControlManager' ||
-            mimeType === 'application/oipfSearchManager';
+        var type = String(mimeType || '').toLowerCase();
+        return type === 'video/broadcast' ||
+            type === 'video/mpeg' ||
+            type === 'application/oipfapplicationmanager' ||
+            type === 'application/oipfcapabilities' ||
+            type === 'application/oipfconfiguration' ||
+            type === 'application/oipfparentalcontrolmanager' ||
+            type === 'application/oipfsearchmanager';
     };
     window.oipfObjectFactory.createVideoBroadcastObject = function () {
         window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: createVideoBroadcastObject() ...');
@@ -30924,14 +30925,18 @@ const hbbtvFn = function () {
     var objects = document.getElementsByTagName("object");
     for (var i = 0; i < objects.length; i++) {
         var oipfPluginObject = objects.item(i);
-        var sType = oipfPluginObject.getAttribute("type");
-        if (sType === "application/oipfApplicationManager") {
+        var rawType = oipfPluginObject.getAttribute("type") || "";
+        var sType = String(rawType).toLowerCase();
+        var sId = oipfPluginObject.getAttribute("id") || "";
+        if (sType === "application/oipfapplicationmanager") {
             mixin(window.oipfApplicationManager, oipfPluginObject);
-        } else if (sType === "application/oipfConfiguration") {
+            window.signalopenhbbtvbrowser && window.signalopenhbbtvbrowser("LOG:OIPF object bound type=" + rawType + " id=" + sId + " object=applicationManager");
+        } else if (sType === "application/oipfconfiguration") {
             mixin(window.oipfConfiguration, oipfPluginObject);
-        } else if (sType === "oipfCapabilities") {
+            window.signalopenhbbtvbrowser && window.signalopenhbbtvbrowser("LOG:OIPF object bound type=" + rawType + " id=" + sId + " object=configuration");
+        } else if (sType === "application/oipfcapabilities" || sType === "oipfcapabilities") {
             mixin(window.oipfCapabilities, oipfPluginObject);
-            break;
+            window.signalopenhbbtvbrowser && window.signalopenhbbtvbrowser("LOG:OIPF object bound type=" + rawType + " id=" + sId + " object=capabilities");
         }
     }
 };
@@ -31006,6 +31011,39 @@ function init() {
             window.setTimeout(window.__openatvHbbtvFlushCommandQueue, 0);
         }
     };
+    if (!window.__openatvHbbtvErrorLogInstalled) {
+        window.__openatvHbbtvErrorLogInstalled = true;
+        var openatvHbbtvShortText = function(value, limit) {
+            var text = String(value || "");
+            limit = limit || 1000;
+            return text.length > limit ? text.substr(0, limit) + "..." : text;
+        };
+        var openatvHbbtvErrorText = function(error) {
+            if (!error) {
+                return "";
+            }
+            if (error.stack) {
+                return error.stack;
+            }
+            if (error.message) {
+                return error.message;
+            }
+            return String(error);
+        };
+        window.addEventListener("error", function(event) {
+            var text = "JSWindowError message=" + openatvHbbtvShortText(event && event.message, 360);
+            text += " source=" + openatvHbbtvShortText(event && event.filename, 220);
+            text += " line=" + ((event && event.lineno) || 0);
+            text += " column=" + ((event && event.colno) || 0);
+            text += " stack=" + openatvHbbtvShortText(openatvHbbtvErrorText(event && event.error), 700);
+            window.signalopenhbbtvbrowser("LOG:" + text);
+        });
+        window.addEventListener("unhandledrejection", function(event) {
+            var reason = event && event.reason;
+            var text = "JSUnhandledRejection reason=" + openatvHbbtvShortText(openatvHbbtvErrorText(reason), 1100);
+            window.signalopenhbbtvbrowser("LOG:" + text);
+        });
+    }
     window.signalopenhbbtvbrowser('LOG:OpenHbbTV navigator.userAgent=' + navigator.userAgent);
     window.signalopenhbbtvbrowser('LOG:OpenHbbTV navigator.platform=' + navigator.platform + ' language=' + navigator.language);
     window.signalopenhbbtvbrowser('LOG:OpenHbbTV capability policy: no +DL no +DRM');
