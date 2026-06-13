@@ -115,6 +115,9 @@ WebView::WebView(QWidget *parent)
     : QWebEngineView(parent)
     , m_streamState(0)
     , m_streamError(-1)
+    , m_lastStreamPositionMs(-1)
+    , m_lastStreamDurationMs(-1)
+    , m_hasStreamPosition(false)
     , m_streamOverlayVisible(true)
     , m_streamOverlayLowered(false)
     , m_silentPlayingStatePending(false)
@@ -777,6 +780,15 @@ void WebView::showApplicationOverlay(const QString &reason)
             syncDeferredStreamStateToApplication(reason);
         });
     }
+    if (m_streamState == 1 && m_streamOverlayVisible && m_hasStreamPosition) {
+        QTimer::singleShot(220, this, [this, reason]() {
+            if (m_streamState != 1 || !m_streamOverlayVisible || !m_hasStreamPosition)
+                return;
+            qDebug() << "[OpenHbbTV] sync deferred stream position to visible overlay" << reason
+                     << m_lastStreamPositionMs << m_lastStreamDurationMs;
+            setStreamPosition(m_lastStreamPositionMs, m_lastStreamDurationMs);
+        });
+    }
 }
 
 void WebView::syncDeferredStreamStateToApplication(const QString &reason)
@@ -948,6 +960,11 @@ void WebView::setStreamState(int state, int error)
     OpenHbbTVRequestInterceptor::setExternalPlaybackActive(state == 1 || state == 2);
     if (state != 1)
         setStreamRendererActive(true, QStringLiteral("stream state not playing"));
+    if (state == 0) {
+        m_hasStreamPosition = false;
+        m_lastStreamPositionMs = -1;
+        m_lastStreamDurationMs = -1;
+    }
     const QString silentPlayingValue = QString::fromLocal8Bit(qgetenv("OPENHBBTV_STREAM_SILENT_PLAYING_STATE")).trimmed().toLower();
     const bool silentPlayingState = state == 1 && !m_streamOverlayVisible &&
         (silentPlayingValue == QStringLiteral("1") ||
@@ -1012,10 +1029,20 @@ void WebView::setStreamState(int state, int error)
 
 void WebView::setStreamPosition(qint64 positionMs, qint64 durationMs)
 {
+    m_lastStreamPositionMs = positionMs;
+    m_lastStreamDurationMs = durationMs;
+    m_hasStreamPosition = positionMs >= 0 || durationMs >= 0;
+    const bool skipHiddenPositionJs = m_streamState == 1 && !m_streamOverlayVisible &&
+        openHbbTVEnvEnabled("OPENHBBTV_STREAM_SKIP_HIDDEN_POSITION_JS", true);
     qDebug() << "[OpenHbbTV] setStreamPosition" << positionMs << durationMs
-             << "streamState" << m_streamState
-             << "overlayVisible" << m_streamOverlayVisible;
+              << "streamState" << m_streamState
+              << "overlayVisible" << m_streamOverlayVisible
+              << "skipHiddenPositionJs" << skipHiddenPositionJs;
     recordDiagnosticEvent(QStringLiteral("setStreamPosition %1,%2").arg(positionMs).arg(durationMs));
+    if (skipHiddenPositionJs) {
+        qDebug() << "[OpenHbbTV] skip hidden stream position JS; E2 owns external playback";
+        return;
+    }
     QString s = QString::fromLatin1("(function() {"
                                     "  window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};"
                                     "  if (typeof window.HBBTV_POLYFILL_NS.setStreamPosition === 'function') {"

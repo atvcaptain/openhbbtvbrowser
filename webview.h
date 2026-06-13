@@ -155,6 +155,9 @@ private:
     QString m_lastBroadcastInfo;
     int m_streamState;
     int m_streamError;
+    qint64 m_lastStreamPositionMs;
+    qint64 m_lastStreamDurationMs;
+    bool m_hasStreamPosition;
     bool m_streamOverlayVisible;
     bool m_streamOverlayLowered;
     bool m_silentPlayingStatePending;
