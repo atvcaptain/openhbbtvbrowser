@@ -120,7 +120,7 @@ int main(int argc, char *argv[])
     qputenv("QT_QPA_EGLFS_HIDECURSOR", QByteArrayLiteral("1"));
     installOpenHbbTVDebugLogger();
     qDebug() << "[OpenHbbTV] process start argc" << argc;
-    qDebug() << "[OpenHbbTV] process build id e2-rcu-owner-keybridge-v52-defer-native-lower-20260613";
+    qDebug() << "[OpenHbbTV] process build id e2-rcu-owner-keybridge-v53-transparent-doc-hide-20260613";
     qDebug() << "[OpenHbbTV] build mode e2-rcu-owner-stream-overlay-window";
     QByteArray chromiumLang = qgetenv("OPENHBBTV_CHROMIUM_LANG").trimmed();
     if (chromiumLang.isEmpty())

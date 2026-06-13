@@ -121,6 +121,7 @@ WebView::WebView(QWidget *parent)
     , m_streamOverlayVisible(true)
     , m_streamOverlayLowered(false)
     , m_streamNativeLowerPending(false)
+    , m_streamDocumentHiddenForPlayback(false)
     , m_silentPlayingStatePending(false)
     , m_streamRendererFrozen(false)
     , m_streamViewHiddenForPlayback(false)
@@ -698,6 +699,7 @@ void WebView::showApplicationOverlay(const QString &reason)
     const bool pageLoadRefresh = reasonLower.contains(QStringLiteral("page load finished"));
     const bool wasOverlayVisible = m_streamOverlayVisible;
     const bool wasOverlayLowered = m_streamOverlayLowered;
+    const bool wasDocumentHidden = m_streamDocumentHiddenForPlayback;
     m_streamOverlayVisible = true;
     m_streamNativeLowerPending = false;
     if (isStreamActive())
@@ -759,23 +761,12 @@ void WebView::showApplicationOverlay(const QString &reason)
         retryOverlayRepaint(reason, 120);
         retryOverlayRepaint(reason, 450);
     }
-    const bool skipDuplicateOverlayJs = duplicateVisibleOverlay &&
+    const bool skipDuplicateOverlayJs = duplicateVisibleOverlay && !wasDocumentHidden &&
         openHbbTVEnvEnabled("OPENHBBTV_STREAM_SKIP_DUPLICATE_OVERLAY_JS", true);
     if (skipDuplicateOverlayJs) {
         qDebug() << "[OpenHbbTV] skip duplicate visible overlay JS refresh" << reason;
     } else {
-        runJavaScriptWithWatchdog(QStringLiteral("showApplicationOverlay ") + reason, QString::fromLatin1(
-            "(function() {"
-            "  try { if (document.documentElement) document.documentElement.style.visibility = 'visible'; } catch (e) {}"
-            "  try { if (document.body) { document.body.style.visibility = 'visible'; document.body.style.display = ''; document.body.style.opacity = '1'; if (document.body.focus) document.body.focus(); } } catch (e) {}"
-            "  try {"
-            "    if (window.oipfApplicationManager && window.oipfApplicationManager.getOwnerApplication) {"
-            "      var app = window.oipfApplicationManager.getOwnerApplication(document);"
-            "      if (app && app.show) app.show();"
-            "    }"
-            "  } catch (e) {}"
-            "  try { window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('focus')); } catch (e) {}"
-            "})();"));
+        restoreApplicationDocumentForOverlay(reason);
     }
     if (m_silentPlayingStatePending && m_streamState == 1) {
         QTimer::singleShot(180, this, [this, reason]() {
@@ -791,6 +782,92 @@ void WebView::showApplicationOverlay(const QString &reason)
             setStreamPosition(m_lastStreamPositionMs, m_lastStreamDurationMs);
         });
     }
+}
+
+void WebView::hideApplicationDocumentForPlayback(const QString &reason)
+{
+    if (!openHbbTVEnvEnabled("OPENHBBTV_STREAM_HIDE_DOCUMENT_ON_FULLSCREEN", true)) {
+        qDebug() << "[OpenHbbTV] stream document hide disabled" << reason;
+        return;
+    }
+    if (m_streamDocumentHiddenForPlayback) {
+        qDebug() << "[OpenHbbTV] skip duplicate stream document hide" << reason;
+        return;
+    }
+
+    m_streamDocumentHiddenForPlayback = true;
+    qDebug() << "[OpenHbbTV] hide application document for external playback" << reason;
+    runJavaScriptWithWatchdog(QStringLiteral("hideApplicationDocumentForPlayback ") + reason, QString::fromLatin1(
+        "(function() {"
+        "  try {"
+        "    function snap(el) {"
+        "      if (!el) return null;"
+        "      return {"
+        "        visibility: el.style.visibility || '',"
+        "        opacity: el.style.opacity || '',"
+        "        pointerEvents: el.style.pointerEvents || '',"
+        "        background: el.style.background || '',"
+        "        backgroundColor: el.style.backgroundColor || ''"
+        "      };"
+        "    }"
+        "    if (!window.__openhbbtvOverlayHiddenState) {"
+        "      window.__openhbbtvOverlayHiddenState = {"
+        "        html: snap(document.documentElement),"
+        "        body: snap(document.body)"
+        "      };"
+        "    }"
+        "    function hide(el) {"
+        "      if (!el) return;"
+        "      el.style.visibility = 'hidden';"
+        "      el.style.opacity = '0';"
+        "      el.style.pointerEvents = 'none';"
+        "      el.style.background = 'transparent';"
+        "      el.style.backgroundColor = 'transparent';"
+        "    }"
+        "    hide(document.documentElement);"
+        "    hide(document.body);"
+        "    if (window.oipfApplicationManager && window.oipfApplicationManager.getOwnerApplication) {"
+        "      var app = window.oipfApplicationManager.getOwnerApplication(document);"
+        "      if (app && app.hide) app.hide();"
+        "    }"
+        "  } catch (e) {}"
+        "})();"));
+}
+
+void WebView::restoreApplicationDocumentForOverlay(const QString &reason)
+{
+    const bool wasHidden = m_streamDocumentHiddenForPlayback;
+    m_streamDocumentHiddenForPlayback = false;
+    qDebug() << "[OpenHbbTV] restore application document for overlay" << reason
+             << "wasHidden" << wasHidden;
+    runJavaScriptWithWatchdog(QStringLiteral("showApplicationOverlay ") + reason, QString::fromLatin1(
+        "(function() {"
+        "  try {"
+        "    var state = window.__openhbbtvOverlayHiddenState || null;"
+        "    function apply(el, snap) {"
+        "      if (!el) return;"
+        "      if (snap) {"
+        "        el.style.visibility = snap.visibility || '';"
+        "        el.style.opacity = snap.opacity || '';"
+        "        el.style.pointerEvents = snap.pointerEvents || '';"
+        "        el.style.background = snap.background || '';"
+        "        el.style.backgroundColor = snap.backgroundColor || '';"
+        "      }"
+        "    }"
+        "    apply(document.documentElement, state && state.html);"
+        "    apply(document.body, state && state.body);"
+        "    window.__openhbbtvOverlayHiddenState = null;"
+        "  } catch (e) {}"
+        "  try { if (document.documentElement) document.documentElement.style.visibility = 'visible'; } catch (e) {}"
+        "  try { if (document.body) { document.body.style.visibility = 'visible'; document.body.style.display = ''; document.body.style.opacity = '1'; document.body.style.pointerEvents = ''; if (document.body.focus) document.body.focus(); } } catch (e) {}"
+        "  try {"
+        "    if (window.oipfApplicationManager && window.oipfApplicationManager.getOwnerApplication) {"
+        "      var app = window.oipfApplicationManager.getOwnerApplication(document);"
+        "      if (app && app.show) app.show();"
+        "    }"
+        "  } catch (e) {}"
+        "  try { window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('focus')); } catch (e) {}"
+        "})();"));
 }
 
 void WebView::syncDeferredStreamStateToApplication(const QString &reason)
@@ -850,6 +927,7 @@ void WebView::hideApplicationOverlay(const QString &reason)
     if (!reasonLower.contains(QStringLiteral("auto hide")))
         m_streamOverlayHoldUntilMs = 0;
     qDebug() << "[OpenHbbTV] hide application overlay" << reason;
+    hideApplicationDocumentForPlayback(reason);
     QWidget *top = window();
     if (top) {
         if (!m_streamOverlayGeometryValid && top->geometry().isValid()) {
