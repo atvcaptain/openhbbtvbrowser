@@ -25,7 +25,7 @@ BrowserWindow::BrowserWindow(QWidget *parent, Qt::WindowFlags flags)
     connect(m_webView, &WebView::hbbtvCommand, this, &BrowserWindow::sendHbbtvCommand);
     connect(m_commandClient, &CommandClient::commandReceived, this, &BrowserWindow::onBackendCommand);
     qDebug() << "[OpenHbbTV] BrowserWindow created";
-    qDebug() << "[OpenHbbTV] build id e2-rcu-owner-v59-zdf-broadcast-overlay-guard-20260613";
+    qDebug() << "[OpenHbbTV] build id e2-rcu-owner-v60-zdf-native-overlay-guard-20260613";
     qDebug() << "[OpenHbbTV] backend command support OPEN_URL SET_CHANNEL BROADCAST_INFO SHOW_APPLICATION HIDE_APPLICATION INJECT_KEY SET_STREAM_STATE SET_STREAM_POSITION QUIT";
 }
 
