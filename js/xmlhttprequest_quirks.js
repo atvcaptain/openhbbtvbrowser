@@ -177,6 +177,47 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     }
   }
 
+  function isZdfInitUrl(url) {
+    try {
+      return zdfBootDebugEnabled() && isZdfPage() &&
+             String(url || "").toLowerCase().indexOf("/al/init") >= 0;
+    } catch (ignore) {
+      return false;
+    }
+  }
+
+  function installZdfResponseTextProbe(url, response) {
+    try {
+      if (!isZdfInitUrl(url) || !response || typeof response.text !== "function" ||
+          response.__openhbbtvZdfTextProbe)
+        return;
+      var originalText = response.text;
+      response.__openhbbtvZdfTextProbe = true;
+      response.text = function() {
+        log("ZDFBOOT", "Response.text called " + String(url || "") +
+            " status=" + response.status + " ok=" + response.ok);
+        try {
+          return originalText.apply(response, arguments).then(function(body) {
+            log("ZDFBOOT", "Response.text resolved " + String(url || "") +
+                " len=" + String(body || "").length);
+            logZdfInitDetails(url, body);
+            return body;
+          }, function(error) {
+            log("ZDFBOOT", "Response.text rejected " + String(url || "") +
+                " error=" + stackText(error));
+            throw error;
+          });
+        } catch (error) {
+          log("ZDFBOOT", "Response.text threw " + String(url || "") +
+              " error=" + stackText(error));
+          throw error;
+        }
+      };
+    } catch (error) {
+      log("ZDFBOOT", "Response.text probe failed " + stackText(error));
+    }
+  }
+
   function summarizeJson(text) {
     try {
       var value = JSON.parse(String(text || ""));
@@ -361,6 +402,35 @@ window.cefXmlHttpRequestQuirk = function(uri) {
         Array.prototype.map = wrappedMap;
       }
 
+      if (window.Promise && Promise.prototype && Promise.prototype.then &&
+          !Promise.prototype.then.__openhbbtvZdfProbe) {
+        var originalThen = Promise.prototype.then;
+        var rejectionCount = 0;
+        var wrappedThen = function(onFulfilled, onRejected) {
+          var wrappedRejected = onRejected;
+          if (typeof onRejected === "function") {
+            wrappedRejected = function(reason) {
+              try {
+                var text = stackText(reason);
+                if (rejectionCount < 80 &&
+                    (text.indexOf("Cannot read property '0' of undefined") >= 0 ||
+                     text.indexOf("Cannot read properties of undefined") >= 0 ||
+                     text.indexOf("appConfigLoader getInit") >= 0 ||
+                     text.indexOf("bindToCurrentChannel") >= 0)) {
+                  rejectionCount++;
+                  logPieces("ZDFBOOT", "Promise rejection " + rejectionCount,
+                      text + " caller=" + stackText(new Error("promise caller")));
+                }
+              } catch (ignore) {}
+              return onRejected.apply(this, arguments);
+            };
+          }
+          return originalThen.call(this, onFulfilled, wrappedRejected);
+        };
+        wrappedThen.__openhbbtvZdfProbe = true;
+        Promise.prototype.then = wrappedThen;
+      }
+
       if (window.Promise && Promise.allSettled && !Promise.allSettled.__openhbbtvZdfProbe) {
         var originalAllSettled = Promise.allSettled;
         var wrappedAllSettled = function(iterable) {
@@ -473,6 +543,7 @@ window.cefXmlHttpRequestQuirk = function(uri) {
         var requestBody = bodyText(init && init.body);
         return originalFetch.apply(this, arguments).then(function(response) {
           var labels = labelsFor(url);
+          installZdfResponseTextProbe(url, response);
           if (labels.length) {
             try {
               response.clone().text().then(function(body) {

@@ -30521,6 +30521,15 @@ class VideoHandler {
         this.watchAndHandleVideoObjectMutations();
     }
 
+    checkNodeAndDescendantsForVideoMethods(node) {
+        this.checkNodeTypeAndInjectVideoMethods(node);
+        if (node && typeof node.querySelectorAll === 'function') {
+            node.querySelectorAll('*').forEach((child) => {
+                this.checkNodeTypeAndInjectVideoMethods(child);
+            });
+        }
+    }
+
     checkNodeTypeAndInjectVideoMethods(node) {
         let mimeType = node.type;
         if (!node.type){
@@ -30529,6 +30538,10 @@ class VideoHandler {
         mimeType = mimeType.toLowerCase(); // ensure lower case string comparison
 
         if (mimeType.lastIndexOf('video/broadcast', 0) === 0) {
+            if (node.__openhbbtvVideoBroadcastMapped) {
+                return;
+            }
+            node.__openhbbtvVideoBroadcastMapped = true;
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BROADCAST VIDEO PLAYER ...');
             this.videoBroadcastEmbeddedObject = new _video_broadcast_embedded_object__WEBPACK_IMPORTED_MODULE_0__["OipfVideoBroadcastMapper"](node);
         }
@@ -30536,11 +30549,19 @@ class VideoHandler {
             mimeType.lastIndexOf('video/mp4', 0) === 0 ||  // h.264 video
             mimeType.lastIndexOf('audio/mp4', 0) === 0 ||  // aac audio
             mimeType.lastIndexOf('audio/mpeg', 0) === 0) { // mp3 audio
+            if (node.__openhbbtvAvControlMapped) {
+                return;
+            }
+            node.__openhbbtvAvControlMapped = true;
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BROADBAND VIDEO PLAYER ...');
             new _a_v_control_embedded_object__WEBPACK_IMPORTED_MODULE_1__["OipfAVControlMapper"](node);
         }
         // setup mpeg dash player
         if(mimeType.lastIndexOf('application/dash+xml', 0) === 0){
+            if (node.__openhbbtvDashMapped) {
+                return;
+            }
+            node.__openhbbtvDashMapped = true;
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: DASH VIDEO PLAYER ...');
             new _a_v_control_embedded_object__WEBPACK_IMPORTED_MODULE_1__["OipfAVControlMapper"](node, true);
         }
@@ -30555,7 +30576,7 @@ class VideoHandler {
         const handleChildAddedRemoved = (mutation) => {
             if (mutation.addedNodes.length > 0) {
                 mutation.addedNodes.forEach((node) => {
-                    this.checkNodeTypeAndInjectVideoMethods(node);
+                    this.checkNodeAndDescendantsForVideoMethods(node);
                 });
             } else if (mutation.removedNodes.length > 0) {
                 // TODO: handle object removal
@@ -30573,6 +30594,9 @@ class VideoHandler {
                            mutation.target; the attribute name is in
                            mutation.attributeName and its previous value is in
                            mutation.oldValue */
+                        if (mutation.attributeName === 'type') {
+                            this.checkNodeAndDescendantsForVideoMethods(mutation.target);
+                        }
                         break;
                 }
             });
