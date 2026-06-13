@@ -455,6 +455,9 @@ void WebView::injectHbbTVScripts(const QString &src)
     if (polyfill.open(QIODevice::ReadOnly)) {
         QString source = QString::fromUtf8(polyfill.readAll());
         polyfill.close();
+        const bool jsErrorBridge = openHbbTVEnvEnabled("OPENHBBTV_JS_ERROR_BRIDGE", false);
+        source.prepend(QStringLiteral("window.OPENHBBTV_JS_ERROR_BRIDGE=%1;\n")
+            .arg(jsErrorBridge ? QStringLiteral("true") : QStringLiteral("false")));
 
         QWebEngineScript script;
         script.setName("hbbtv_polyfill");
@@ -481,6 +484,7 @@ void WebView::injectHbbTVScripts(const QString &src)
         page()->scripts().insert(cursorScript);
 
         qDebug() << "[HbbTV] Injected polyfill from" << src;
+        qDebug() << "[OpenHbbTV] JS error bridge" << jsErrorBridge;
     } else {
         qWarning() << "[HbbTV] Polyfill not found:" << src;
     }

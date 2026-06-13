@@ -31163,7 +31163,7 @@ function init() {
             window.setTimeout(window.__openatvHbbtvFlushCommandQueue, 0);
         }
     };
-    if (!window.__openatvHbbtvErrorLogInstalled) {
+    if (window.OPENHBBTV_JS_ERROR_BRIDGE === true && !window.__openatvHbbtvErrorLogInstalled) {
         window.__openatvHbbtvErrorLogInstalled = true;
         var openatvHbbtvShortText = function(value, limit) {
             var text = String(value || "");
