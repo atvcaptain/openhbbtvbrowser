@@ -127,6 +127,12 @@ private:
     void recordDiagnosticEvent(const QString &event);
     void dumpRenderCrashDiagnostics(int status, int exitCode);
     QString diagnosticSnippet(const QString &text, int maxLength = 220) const;
+    bool rendererHeartbeatEnabled() const;
+    int rendererHeartbeatIntervalMs() const;
+    int rendererHeartbeatTimeoutMs() const;
+    void startRendererHeartbeat();
+    void probeRendererHeartbeat();
+    void dumpRendererHeartbeatDiagnostics(const QString &reason);
     bool shouldForceNativeVisibleRefresh(const QString &reason) const;
     void forceNativeVisibleRefresh(QWidget *top, const QString &reason);
     void repaintOverlaySurface(const QString &reason);
@@ -168,6 +174,9 @@ private:
     QStringList m_recentDiagnosticEvents;
     int m_diagnosticSeq;
     int m_jsSeq;
+    int m_rendererHeartbeatSeq;
+    int m_rendererHeartbeatPendingSeq;
+    bool m_rendererHeartbeatStalled;
     QString m_lastJsStarted;
     QString m_lastJsCompleted;
     QString m_lastBridgeCommand;
@@ -181,6 +190,7 @@ private:
     QPointer<WebPage> m_teletextPage;
     bool m_usingTeletextPage;
     QString m_teletextDigitBuffer;
+    QTimer *m_rendererHeartbeatTimer;
     QTimer *m_teletextDigitTimer;
     QLabel *m_quitMsg;
     int m_quitMsgStatus;

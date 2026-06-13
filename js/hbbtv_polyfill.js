@@ -31983,6 +31983,27 @@ class OipfVideoBroadcastMapper {
     if (ns.html5VodBridgeInstalled) {
         return;
     }
+    function isZdfPage() {
+        try {
+            var host = String((window.location && window.location.hostname) || '').toLowerCase();
+            return host === 'new-hbbtv.zdf.de' || host === 'hbbtv.zdf.de' || /\.zdf\.de$/.test(host);
+        } catch (ignore) {
+            return false;
+        }
+    }
+    if (ns.html5VodBridgeDisabledForZdf) {
+        return;
+    }
+    if (window.OPENHBBTV_ZDF_DISABLE_HTML5VOD_BRIDGE === true && isZdfPage()) {
+        ns.html5VodBridgeDisabledForZdf = true;
+        try {
+            if (window.signalopenhbbtvbrowser) {
+                window.signalopenhbbtvbrowser('LOG:HTML5VOD disabled on ZDF startup');
+            }
+        } catch (ignore) {
+        }
+        return;
+    }
     ns.html5VodBridgeInstalled = true;
     ns.html5VodLastManifestUrl = '';
     ns.html5VodLastManifestAt = 0;

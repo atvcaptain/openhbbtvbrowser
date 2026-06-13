@@ -133,11 +133,15 @@ WebView::WebView(QWidget *parent)
     , m_jsTimeoutRecoveryPending(false)
     , m_diagnosticSeq(0)
     , m_jsSeq(0)
+    , m_rendererHeartbeatSeq(0)
+    , m_rendererHeartbeatPendingSeq(0)
+    , m_rendererHeartbeatStalled(false)
     , m_currentOnid(-1)
     , m_currentTsid(-1)
     , m_currentSid(-1)
     , m_teletextReturnInProgress(false)
     , m_usingTeletextPage(false)
+    , m_rendererHeartbeatTimer(new QTimer(this))
     , m_teletextDigitTimer(new QTimer(this))
     , m_quitMsg(new QLabel)
     , m_quitMsgStatus(0)
@@ -163,6 +167,8 @@ WebView::WebView(QWidget *parent)
     m_teletextDigitTimer->setSingleShot(true);
     m_teletextDigitTimer->setInterval(1200);
     connect(m_teletextDigitTimer, &QTimer::timeout, this, &WebView::flushTeletextDigitBuffer);
+    m_rendererHeartbeatTimer->setSingleShot(false);
+    connect(m_rendererHeartbeatTimer, &QTimer::timeout, this, &WebView::probeRendererHeartbeat);
 
     connect(this, &QWebEngineView::titleChanged, this, &WebView::titleChanged);
     connect(this, &QWebEngineView::loadStarted, this, [this]() {
@@ -188,6 +194,7 @@ WebView::WebView(QWidget *parent)
     });
     connect(this, &QWebEngineView::loadFinished, this, &WebView::loadFinished);
     attachPageDiagnostics();
+    startRendererHeartbeat();
 }
 
 void WebView::attachPageDiagnostics()
@@ -420,6 +427,125 @@ void WebView::dumpRenderCrashDiagnostics(int status, int exitCode)
     qWarning() << "[OpenHbbTV] render crash diagnostics end";
 }
 
+bool WebView::rendererHeartbeatEnabled() const
+{
+    return openHbbTVEnvEnabled("OPENHBBTV_RENDER_HEARTBEAT", true);
+}
+
+int WebView::rendererHeartbeatIntervalMs() const
+{
+    return openHbbTVEnvInt("OPENHBBTV_RENDER_HEARTBEAT_INTERVAL_MS", 2500, 1000, 30000);
+}
+
+int WebView::rendererHeartbeatTimeoutMs() const
+{
+    return openHbbTVEnvInt("OPENHBBTV_RENDER_HEARTBEAT_TIMEOUT_MS", 1500, 300, 10000);
+}
+
+void WebView::startRendererHeartbeat()
+{
+    if (!rendererHeartbeatEnabled())
+        return;
+
+    const int intervalMs = rendererHeartbeatIntervalMs();
+    m_rendererHeartbeatTimer->setInterval(intervalMs);
+    m_rendererHeartbeatTimer->start();
+    recordDiagnosticEvent(QStringLiteral("renderer-heartbeat-start interval=%1 timeout=%2")
+        .arg(intervalMs)
+        .arg(rendererHeartbeatTimeoutMs()));
+    qDebug() << "[OpenHbbTV] renderer heartbeat enabled"
+             << "interval" << intervalMs
+             << "timeout" << rendererHeartbeatTimeoutMs();
+    QTimer::singleShot(500, this, &WebView::probeRendererHeartbeat);
+}
+
+void WebView::dumpRendererHeartbeatDiagnostics(const QString &reason)
+{
+    QWidget *top = window();
+    qWarning() << "[OpenHbbTV] renderer heartbeat diagnostics begin"
+               << "reason" << reason
+               << "url" << url().toString()
+               << "lastLoadUrl" << m_lastLoadUrl
+               << "title" << m_lastTitle
+               << "streamState" << m_streamState
+               << "streamError" << m_streamError
+               << "overlayVisible" << m_streamOverlayVisible
+               << "overlayLowered" << m_streamOverlayLowered
+               << "rendererFrozen" << m_streamRendererFrozen
+               << "viewHiddenForPlayback" << m_streamViewHiddenForPlayback
+               << "viewVisible" << isVisible()
+               << "windowVisible" << (top ? top->isVisible() : false)
+               << "viewGeometry" << geometry()
+               << "windowGeometry" << (top ? top->geometry() : QRect())
+               << "externalPlaybackGuard" << OpenHbbTVRequestInterceptor::externalPlaybackActive();
+    qWarning() << "[OpenHbbTV] renderer heartbeat last activity"
+               << "jsStarted" << m_lastJsStarted
+               << "jsCompleted" << m_lastJsCompleted
+               << "bridge" << m_lastBridgeCommand
+               << "backend" << m_lastBackendCommand
+               << "browser" << m_lastBrowserCommand
+               << "teletext" << isTeletextUrl();
+    for (const QString &entry : m_recentDiagnosticEvents)
+        qWarning() << "[OpenHbbTV] renderer heartbeat recent" << entry;
+    qWarning() << "[OpenHbbTV] renderer heartbeat diagnostics end";
+}
+
+void WebView::probeRendererHeartbeat()
+{
+    if (!rendererHeartbeatEnabled()) {
+        if (m_rendererHeartbeatTimer->isActive())
+            m_rendererHeartbeatTimer->stop();
+        return;
+    }
+    if (!page() || m_rendererHeartbeatPendingSeq)
+        return;
+
+    const int seq = ++m_rendererHeartbeatSeq;
+    m_rendererHeartbeatPendingSeq = seq;
+    const int timeoutMs = rendererHeartbeatTimeoutMs();
+    const QString label = QStringLiteral("renderer-heartbeat #%1").arg(seq);
+    recordDiagnosticEvent(QStringLiteral("renderer-heartbeat-probe #%1").arg(seq));
+    QSharedPointer<bool> completed(new bool(false));
+    QPointer<WebView> self(this);
+    page()->runJavaScript(QString::fromLatin1(
+        "(function(){"
+        "  try {"
+        "    return String(Date.now()) + ' ready=' + String(document.readyState) + ' url=' + String(location.href).substr(0,180);"
+        "  } catch (e) {"
+        "    return 'error=' + String(e && (e.stack || e.message) || e);"
+        "  }"
+        "})();"),
+        [completed, self, seq, label](const QVariant &result) {
+            *completed = true;
+            if (!self)
+                return;
+            if (self->m_rendererHeartbeatPendingSeq == seq)
+                self->m_rendererHeartbeatPendingSeq = 0;
+            self->recordDiagnosticEvent(QStringLiteral("renderer-heartbeat-ok #%1 result=%2")
+                .arg(seq)
+                .arg(self->diagnosticSnippet(result.toString())));
+            if (self->m_rendererHeartbeatStalled) {
+                self->m_rendererHeartbeatStalled = false;
+                qWarning() << "[OpenHbbTV] renderer heartbeat recovered"
+                           << label
+                           << result.toString();
+            }
+        });
+
+    QTimer::singleShot(timeoutMs, this, [this, completed, seq, label]() {
+        if (*completed || m_rendererHeartbeatPendingSeq != seq)
+            return;
+        m_rendererHeartbeatStalled = true;
+        recordDiagnosticEvent(QStringLiteral("renderer-heartbeat-timeout #%1").arg(seq));
+        qWarning() << "[OpenHbbTV] renderer heartbeat timeout"
+                   << label
+                   << "timeout" << rendererHeartbeatTimeoutMs()
+                   << "stream" << m_streamState
+                   << "url" << url().toString();
+        dumpRendererHeartbeatDiagnostics(label);
+    });
+}
+
 void WebView::runJavaScriptWithWatchdog(const QString &label, const QString &script, int timeoutMs, bool recoverOnTimeout)
 {
     QSharedPointer<bool> completed(new bool(false));
@@ -520,6 +646,7 @@ void WebView::injectXmlHttpRequestScripts()
         const bool zdfDirectInitRequest = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DIRECT_INIT_REQUEST", false);
         const bool zdfSilentBroadcastObject = openHbbTVEnvEnabled("OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT", true);
         const bool zdfSkipBroadcastAudioComponents = openHbbTVEnvEnabled("OPENHBBTV_ZDF_SKIP_BROADCAST_AUDIO_COMPONENTS", true);
+        const bool zdfDisableHtml5VodBridge = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DISABLE_HTML5VOD_BRIDGE", true);
         source.prepend(QStringLiteral("window.OPENHBBTV_AUTH_HTTP_DEBUG=%1;\n"
                                       "window.OPENHBBTV_HBBTV_HTTP_DEBUG=%2;\n"
                                       "window.OPENHBBTV_HBBTV_HTTP_BODY_DEBUG=%3;\n"
@@ -552,6 +679,8 @@ void WebView::injectXmlHttpRequestScripts()
                            .arg(zdfSilentBroadcastObject ? QStringLiteral("true") : QStringLiteral("false")));
         source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_SKIP_BROADCAST_AUDIO_COMPONENTS=%1;\n")
                            .arg(zdfSkipBroadcastAudioComponents ? QStringLiteral("true") : QStringLiteral("false")));
+        source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_DISABLE_HTML5VOD_BRIDGE=%1;\n")
+                           .arg(zdfDisableHtml5VodBridge ? QStringLiteral("true") : QStringLiteral("false")));
 
         QWebEngineScript script;
         script.setName("xmlhttprequest_quirks");
@@ -575,7 +704,8 @@ void WebView::injectXmlHttpRequestScripts()
                  << "zdf direct init request" << zdfDirectInitRequest
                  << "zdf stable object entries" << zdfStableObjectEntries
                  << "zdf silent broadcast object" << zdfSilentBroadcastObject
-                 << "zdf skip broadcast audio components" << zdfSkipBroadcastAudioComponents;
+                 << "zdf skip broadcast audio components" << zdfSkipBroadcastAudioComponents
+                 << "zdf disable html5 vod bridge" << zdfDisableHtml5VodBridge;
     } else {
         qWarning() << "[HbbTV] xmlhttprequest_quirks.js not found in qrc";
     }
