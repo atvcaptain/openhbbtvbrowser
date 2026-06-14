@@ -31529,8 +31529,17 @@ class OipfVideoBroadcastMapper {
                 if (window.OPENHBBTV_ZDF_BOOT_TRACE !== true || !isZdfPage()) {
                     return;
                 }
+                const traceKey = String(label || 'trace');
+                window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
+                const counts = window.HBBTV_POLYFILL_NS.zdfTraceCounts || {};
+                window.HBBTV_POLYFILL_NS.zdfTraceCounts = counts;
+                const count = (counts[traceKey] || 0) + 1;
+                counts[traceKey] = count;
+                if (count > 5 && count !== 10 && count !== 25 && count !== 50 && count % 100 !== 0) {
+                    return;
+                }
                 const text = value === undefined ? '' : ' ' + String(value).substr(0, 400);
-                console.warn('[OpenHbbTV][ZDFTRACE] polyfill ' + label + text);
+                console.warn('[OpenHbbTV][ZDFTRACE] polyfill ' + label + '#' + count + text);
             }
             catch (e) {
             }

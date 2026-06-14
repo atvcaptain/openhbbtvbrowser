@@ -259,7 +259,14 @@ window.cefXmlHttpRequestQuirk = function(uri) {
     try {
       if (!zdfBootTraceEnabled() || !isZdfPage() || !window.console)
         return;
-      var message = "[OpenHbbTV][ZDFTRACE] " + label + (text ? " " + mask(text) : "");
+      var traceKey = String(label || "trace");
+      var counts = window.__openhbbtvZdfTraceCounts || {};
+      window.__openhbbtvZdfTraceCounts = counts;
+      var count = (counts[traceKey] || 0) + 1;
+      counts[traceKey] = count;
+      if (count > 5 && count !== 10 && count !== 25 && count !== 50 && count % 100 !== 0)
+        return;
+      var message = "[OpenHbbTV][ZDFTRACE] " + label + "#" + count + (text ? " " + mask(text) : "");
       if (typeof window.console.warn === "function")
         window.console.warn(message);
       else if (typeof window.console.log === "function")

@@ -590,8 +590,20 @@ void WebView::injectHbbTVScripts(const QString &src)
         QString source = QString::fromUtf8(polyfill.readAll());
         polyfill.close();
         const bool jsErrorBridge = openHbbTVEnvEnabled("OPENHBBTV_JS_ERROR_BRIDGE", false);
+        const bool zdfBootTrace = openHbbTVEnvEnabled("OPENHBBTV_ZDF_BOOT_TRACE", false);
+        const bool zdfSilentBroadcastObject = openHbbTVEnvEnabled("OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT", true);
+        const bool zdfSkipBroadcastAudioComponents = openHbbTVEnvEnabled("OPENHBBTV_ZDF_SKIP_BROADCAST_AUDIO_COMPONENTS", true);
+        const bool zdfDisableHtml5VodBridge = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DISABLE_HTML5VOD_BRIDGE", true);
         source.prepend(QStringLiteral("window.OPENHBBTV_JS_ERROR_BRIDGE=%1;\n")
             .arg(jsErrorBridge ? QStringLiteral("true") : QStringLiteral("false")));
+        source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_BOOT_TRACE=%1;\n")
+            .arg(zdfBootTrace ? QStringLiteral("true") : QStringLiteral("false")));
+        source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT=%1;\n")
+            .arg(zdfSilentBroadcastObject ? QStringLiteral("true") : QStringLiteral("false")));
+        source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_SKIP_BROADCAST_AUDIO_COMPONENTS=%1;\n")
+            .arg(zdfSkipBroadcastAudioComponents ? QStringLiteral("true") : QStringLiteral("false")));
+        source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_DISABLE_HTML5VOD_BRIDGE=%1;\n")
+            .arg(zdfDisableHtml5VodBridge ? QStringLiteral("true") : QStringLiteral("false")));
 
         QWebEngineScript script;
         script.setName("hbbtv_polyfill");
@@ -618,7 +630,11 @@ void WebView::injectHbbTVScripts(const QString &src)
         page()->scripts().insert(cursorScript);
 
         qDebug() << "[HbbTV] Injected polyfill from" << src;
-        qDebug() << "[OpenHbbTV] JS error bridge" << jsErrorBridge;
+        qDebug() << "[OpenHbbTV] JS error bridge" << jsErrorBridge
+                 << "polyfill zdf boot trace" << zdfBootTrace
+                 << "zdf silent broadcast object" << zdfSilentBroadcastObject
+                 << "zdf skip broadcast audio components" << zdfSkipBroadcastAudioComponents
+                 << "zdf disable html5 vod bridge" << zdfDisableHtml5VodBridge;
     } else {
         qWarning() << "[HbbTV] Polyfill not found:" << src;
     }
