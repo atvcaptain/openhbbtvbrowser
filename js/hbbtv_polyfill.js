@@ -31519,7 +31519,11 @@ class OipfVideoBroadcastMapper {
             }
         };
         const zdfSilentBroadcastObject = () => {
-            return window.OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT === true && isZdfPage();
+            return (window.OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT === true ||
+                window.OPENHBBTV_ZDF_MINIMAL_BROADCAST_OBJECT === true) && isZdfPage();
+        };
+        const zdfMinimalBroadcastObject = () => {
+            return window.OPENHBBTV_ZDF_MINIMAL_BROADCAST_OBJECT === true && isZdfPage();
         };
         const zdfSkipBroadcastAudioComponents = () => {
             return window.OPENHBBTV_ZDF_SKIP_BROADCAST_AUDIO_COMPONENTS === true && isZdfPage();
@@ -31550,6 +31554,17 @@ class OipfVideoBroadcastMapper {
                 command === "BROADCAST_HIDDEN" ||
                 command === "UNSET_VIDEO_WINDOW" ||
                 String(command || '').indexOf("SET_VIDEO_WINDOW:") === 0;
+        };
+        const markZdfMinimalBroadcastObject = (reason) => {
+            if (!zdfMinimalBroadcastObject()) {
+                return;
+            }
+            window.HBBTV_POLYFILL_NS = window.HBBTV_POLYFILL_NS || {};
+            if (window.HBBTV_POLYFILL_NS.zdfMinimalBroadcastObjectMarked) {
+                return;
+            }
+            window.HBBTV_POLYFILL_NS.zdfMinimalBroadcastObjectMarked = true;
+            zdfTrace('minimal broadcast object active', reason || 'mapper');
         };
         const send = (command) => {
             if (zdfSilentBroadcastObject() && isBroadcastBridgeCommand(command)) {
@@ -31609,6 +31624,11 @@ class OipfVideoBroadcastMapper {
             }
         };
         const reportVideoWindow = () => {
+            if (zdfMinimalBroadcastObject()) {
+                lastVisible = true;
+                zdfTrace('minimal broadcast video window', 'skip');
+                return;
+            }
             if (zdfSilentBroadcastObject()) {
                 lastVisible = true;
                 zdfTrace('silent broadcast video window', 'skip');
@@ -31642,6 +31662,11 @@ class OipfVideoBroadcastMapper {
             }
         };
         const startVideoWindowObserver = () => {
+            if (zdfMinimalBroadcastObject()) {
+                markZdfMinimalBroadcastObject('observer skip');
+                zdfTrace('minimal broadcast observer', 'skip');
+                return;
+            }
             var mutationObserver = new MutationObserver(reportVideoWindow);
             mutationObserver.observe(document.documentElement || document.body, {
                 attributes: true,
@@ -31659,6 +31684,7 @@ class OipfVideoBroadcastMapper {
 
         oipfPluginObject.style.background = 'transparent';
         oipfPluginObject.playState = 0;
+        markZdfMinimalBroadcastObject('init');
 
         var currentChannel = window.HBBTV_POLYFILL_NS.currentChannel;
         oipfPluginObject.currentChannel = currentChannel;
@@ -31684,6 +31710,10 @@ class OipfVideoBroadcastMapper {
             if (channel) {
                 currentChannel = channel;
                 oipfPluginObject.currentChannel = channel;
+                if (zdfMinimalBroadcastObject()) {
+                    zdfTrace('minimal broadcast setChannel', 'state only');
+                    return true;
+                }
                 send("SET_CHANNEL:" + JSON.stringify({ onid: channel.onid, tsid: channel.tsid, sid: channel.sid, ccid: channel.ccid || '' }));
             }
             reportVideoWindow();
@@ -31691,11 +31721,19 @@ class OipfVideoBroadcastMapper {
         };
         oipfPluginObject.prevChannel = function () {
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo prevChannel() ...');
+            if (zdfMinimalBroadcastObject()) {
+                zdfTrace('minimal broadcast prevChannel', 'state only');
+                return currentChannel;
+            }
             send("PREV_CHANNEL");
             return currentChannel;
         };
         oipfPluginObject.nextChannel = function () {
             window.HBBTV_POLYFILL_DEBUG && console.log('hbbtv-polyfill: BroadcastVideo nextChannel() ...');
+            if (zdfMinimalBroadcastObject()) {
+                zdfTrace('minimal broadcast nextChannel', 'state only');
+                return currentChannel;
+            }
             send("NEXT_CHANNEL");
             return currentChannel;
         };
@@ -31908,6 +31946,10 @@ class OipfVideoBroadcastMapper {
             return true;
         }).bind(oipfPluginObject);
         oipfPluginObject.setFullScreen = (function (state) {
+            if (zdfMinimalBroadcastObject()) {
+                zdfTrace('minimal broadcast fullscreen', !!state);
+                return true;
+            }
             if (zdfSilentBroadcastObject()) {
                 if (state) {
                     this.style.position = 'fixed';
@@ -32040,6 +32082,9 @@ class OipfVideoBroadcastMapper {
 
     function log(message) {
         send('LOG:HTML5VOD ' + message);
+    }
+    if (isZdfPage()) {
+        log('bridge active zdf=1 mutationObserver=' + (zdfDisableHtml5VodMutationObserver() ? 'disabled' : 'enabled'));
     }
 
     function absoluteUrl(url) {

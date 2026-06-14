@@ -59,7 +59,12 @@ window.cefXmlHttpRequestQuirk = function(uri) {
   }
 
   function zdfSilentBroadcastObjectEnabled() {
-    return window.OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT === true && isZdfPage();
+    return (window.OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT === true ||
+            window.OPENHBBTV_ZDF_MINIMAL_BROADCAST_OBJECT === true) && isZdfPage();
+  }
+
+  function zdfMinimalBroadcastObjectEnabled() {
+    return window.OPENHBBTV_ZDF_MINIMAL_BROADCAST_OBJECT === true && isZdfPage();
   }
 
   function zdfSkipBroadcastAudioComponentsEnabled() {
@@ -670,6 +675,12 @@ window.cefXmlHttpRequestQuirk = function(uri) {
 
       function reportVideoWindow(obj) {
         try {
+          if (zdfMinimalBroadcastObjectEnabled()) {
+            if (obj)
+              obj.__openhbbtvEarlyBroadcastVisible = true;
+            zdfTrace("minimal broadcast video window", "skip");
+            return;
+          }
           if (zdfSilentBroadcastObjectEnabled()) {
             if (obj)
               obj.__openhbbtvEarlyBroadcastVisible = true;
@@ -756,6 +767,10 @@ window.cefXmlHttpRequestQuirk = function(uri) {
           channel = normaliseChannel(channel);
           namespace().currentChannel = channel;
           this.currentChannel = channel;
+          if (zdfMinimalBroadcastObjectEnabled()) {
+            zdfTrace("minimal broadcast setChannel", "state only");
+            return true;
+          }
           send("SET_CHANNEL:" + JSON.stringify({
             onid: channel.onid,
             tsid: channel.tsid,
@@ -768,11 +783,19 @@ window.cefXmlHttpRequestQuirk = function(uri) {
       });
       installMethod("prevChannel", function() {
         ensureBroadcastObject(this);
+        if (zdfMinimalBroadcastObjectEnabled()) {
+          zdfTrace("minimal broadcast prevChannel", "state only");
+          return currentChannel();
+        }
         send("PREV_CHANNEL");
         return currentChannel();
       });
       installMethod("nextChannel", function() {
         ensureBroadcastObject(this);
+        if (zdfMinimalBroadcastObjectEnabled()) {
+          zdfTrace("minimal broadcast nextChannel", "state only");
+          return currentChannel();
+        }
         send("NEXT_CHANNEL");
         return currentChannel();
       });
@@ -829,6 +852,10 @@ window.cefXmlHttpRequestQuirk = function(uri) {
       installMethod("setFullScreen", function(state) {
         ensureBroadcastObject(this);
         try {
+          if (zdfMinimalBroadcastObjectEnabled()) {
+            zdfTrace("minimal broadcast fullscreen", String(!!state));
+            return true;
+          }
           if (zdfSilentBroadcastObjectEnabled()) {
             if (state) {
               this.style.position = "fixed";
@@ -903,7 +930,9 @@ window.cefXmlHttpRequestQuirk = function(uri) {
       }
 
       scan(document.documentElement);
-      if (window.MutationObserver && document.documentElement) {
+      if (zdfMinimalBroadcastObjectEnabled()) {
+        zdfTrace("minimal broadcast object active", "early shim observer skip");
+      } else if (window.MutationObserver && document.documentElement) {
         var observer = new MutationObserver(function(mutations) {
           for (var i = 0; i < mutations.length; i++) {
             var mutation = mutations[i];

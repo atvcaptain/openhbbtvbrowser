@@ -592,6 +592,7 @@ void WebView::injectHbbTVScripts(const QString &src)
         const bool jsErrorBridge = openHbbTVEnvEnabled("OPENHBBTV_JS_ERROR_BRIDGE", false);
         const bool zdfBootTrace = openHbbTVEnvEnabled("OPENHBBTV_ZDF_BOOT_TRACE", false);
         const bool zdfSilentBroadcastObject = openHbbTVEnvEnabled("OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT", true);
+        const bool zdfMinimalBroadcastObject = openHbbTVEnvEnabled("OPENHBBTV_ZDF_MINIMAL_BROADCAST_OBJECT", true);
         const bool zdfSkipBroadcastAudioComponents = openHbbTVEnvEnabled("OPENHBBTV_ZDF_SKIP_BROADCAST_AUDIO_COMPONENTS", true);
         const bool zdfDisableHtml5VodBridge = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DISABLE_HTML5VOD_BRIDGE", false);
         const bool zdfDisableHtml5VodMutationObserver = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DISABLE_HTML5VOD_MUTATION_OBSERVER", true);
@@ -601,6 +602,8 @@ void WebView::injectHbbTVScripts(const QString &src)
             .arg(zdfBootTrace ? QStringLiteral("true") : QStringLiteral("false")));
         source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT=%1;\n")
             .arg(zdfSilentBroadcastObject ? QStringLiteral("true") : QStringLiteral("false")));
+        source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_MINIMAL_BROADCAST_OBJECT=%1;\n")
+            .arg(zdfMinimalBroadcastObject ? QStringLiteral("true") : QStringLiteral("false")));
         source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_SKIP_BROADCAST_AUDIO_COMPONENTS=%1;\n")
             .arg(zdfSkipBroadcastAudioComponents ? QStringLiteral("true") : QStringLiteral("false")));
         source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_DISABLE_HTML5VOD_BRIDGE=%1;\n")
@@ -636,6 +639,7 @@ void WebView::injectHbbTVScripts(const QString &src)
         qDebug() << "[OpenHbbTV] JS error bridge" << jsErrorBridge
                  << "polyfill zdf boot trace" << zdfBootTrace
                  << "zdf silent broadcast object" << zdfSilentBroadcastObject
+                 << "zdf minimal broadcast object" << zdfMinimalBroadcastObject
                  << "zdf skip broadcast audio components" << zdfSkipBroadcastAudioComponents
                  << "zdf disable html5 vod bridge" << zdfDisableHtml5VodBridge
                  << "zdf disable html5 vod mutation observer" << zdfDisableHtml5VodMutationObserver;
@@ -665,6 +669,7 @@ void WebView::injectXmlHttpRequestScripts()
         const bool zdfSafeInitFetch = openHbbTVEnvEnabled("OPENHBBTV_ZDF_SAFE_INIT_FETCH", false);
         const bool zdfDirectInitRequest = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DIRECT_INIT_REQUEST", false);
         const bool zdfSilentBroadcastObject = openHbbTVEnvEnabled("OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT", true);
+        const bool zdfMinimalBroadcastObject = openHbbTVEnvEnabled("OPENHBBTV_ZDF_MINIMAL_BROADCAST_OBJECT", true);
         const bool zdfSkipBroadcastAudioComponents = openHbbTVEnvEnabled("OPENHBBTV_ZDF_SKIP_BROADCAST_AUDIO_COMPONENTS", true);
         const bool zdfDisableHtml5VodBridge = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DISABLE_HTML5VOD_BRIDGE", false);
         const bool zdfDisableHtml5VodMutationObserver = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DISABLE_HTML5VOD_MUTATION_OBSERVER", true);
@@ -698,6 +703,8 @@ void WebView::injectXmlHttpRequestScripts()
                            .arg(zdfDirectInitRequest ? QStringLiteral("true") : QStringLiteral("false")));
         source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT=%1;\n")
                            .arg(zdfSilentBroadcastObject ? QStringLiteral("true") : QStringLiteral("false")));
+        source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_MINIMAL_BROADCAST_OBJECT=%1;\n")
+                           .arg(zdfMinimalBroadcastObject ? QStringLiteral("true") : QStringLiteral("false")));
         source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_SKIP_BROADCAST_AUDIO_COMPONENTS=%1;\n")
                            .arg(zdfSkipBroadcastAudioComponents ? QStringLiteral("true") : QStringLiteral("false")));
         source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_DISABLE_HTML5VOD_BRIDGE=%1;\n")
@@ -727,6 +734,7 @@ void WebView::injectXmlHttpRequestScripts()
                  << "zdf direct init request" << zdfDirectInitRequest
                  << "zdf stable object entries" << zdfStableObjectEntries
                  << "zdf silent broadcast object" << zdfSilentBroadcastObject
+                 << "zdf minimal broadcast object" << zdfMinimalBroadcastObject
                  << "zdf skip broadcast audio components" << zdfSkipBroadcastAudioComponents
                  << "zdf disable html5 vod bridge" << zdfDisableHtml5VodBridge
                  << "zdf disable html5 vod mutation observer" << zdfDisableHtml5VodMutationObserver;
