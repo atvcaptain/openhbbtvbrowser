@@ -32000,10 +32000,16 @@ class OipfVideoBroadcastMapper {
             return false;
         }
     }
+    function zdfDisableHtml5VodBridge() {
+        return window.OPENHBBTV_ZDF_DISABLE_HTML5VOD_BRIDGE === true && isZdfPage();
+    }
+    function zdfDisableHtml5VodMutationObserver() {
+        return isZdfPage() && window.OPENHBBTV_ZDF_DISABLE_HTML5VOD_MUTATION_OBSERVER === true;
+    }
     if (ns.html5VodBridgeDisabledForZdf) {
         return;
     }
-    if (window.OPENHBBTV_ZDF_DISABLE_HTML5VOD_BRIDGE === true && isZdfPage()) {
+    if (zdfDisableHtml5VodBridge()) {
         ns.html5VodBridgeDisabledForZdf = true;
         try {
             if (window.signalopenhbbtvbrowser) {
@@ -32093,6 +32099,52 @@ class OipfVideoBroadcastMapper {
 
     function isRoutableMediaUrl(url) {
         return isManifestUrl(url) || isProgressiveMediaUrl(url);
+    }
+
+    function shouldScanMediaResponse(url) {
+        try {
+            url = absoluteUrl(url || '');
+            return isZdfPage() && (pageLooksLikeVodPlayback() || url.indexOf('/al/') >= 0);
+        } catch (ignore) {
+            return false;
+        }
+    }
+
+    function extractRoutableMediaUrls(text) {
+        var result = [];
+        try {
+            text = String(text || '');
+            var re = /https?:\\?\/\\?\/[^"'\s<>]+?\.(?:mpd|m3u8|mp4|m4v|mov|webm)(?:\?[^"'\s<>]*)?/ig;
+            var match;
+            while ((match = re.exec(text))) {
+                var url = String(match[0] || '').replace(/\\\//g, '/');
+                url = absoluteUrl(url);
+                if (isRoutableMediaUrl(url) && result.indexOf(url) < 0) {
+                    result.push(url);
+                }
+                if (result.length >= 8) {
+                    break;
+                }
+            }
+        } catch (ignore) {
+        }
+        return result;
+    }
+
+    function rememberMediaUrlsFromText(text, source, responseUrl) {
+        var urls = extractRoutableMediaUrls(text);
+        if (!urls.length) {
+            return false;
+        }
+        log('media response scan source=' + source + ' response=' + responseUrl + ' count=' + urls.length + ' first=' + urls[0]);
+        urls.forEach(function (url) {
+            if (isManifestUrl(url)) {
+                rememberManifestUrl(url, source, text);
+            } else if (isProgressiveMediaUrl(url) && (pageLooksLikeVodPlayback() || isZdfPage() || isActiveMediaSwitch(url))) {
+                routeManifestToE2(url, 'media response ' + source, null);
+            }
+        });
+        return true;
     }
 
     function isOipfMediaType(type) {
@@ -32677,22 +32729,33 @@ class OipfVideoBroadcastMapper {
         window.fetch = function (input, init) {
             var url = absoluteUrl(requestUrl(input));
             var result = nativeFetch.apply(this, arguments);
-            if (isManifestUrl(url)) {
+            if (isManifestUrl(url) || shouldScanMediaResponse(url)) {
                 try {
                     return result.then(function (response) {
                         try {
                             response.clone().text().then(function (text) {
-                                rememberManifestUrl(url, 'fetch', text);
+                                if (isManifestUrl(url)) {
+                                    rememberManifestUrl(url, 'fetch', text);
+                                }
+                                if (shouldScanMediaResponse(url)) {
+                                    rememberMediaUrlsFromText(text, 'fetch', url);
+                                }
                             }).catch(function () {
-                                rememberManifestUrl(url, 'fetch');
+                                if (isManifestUrl(url)) {
+                                    rememberManifestUrl(url, 'fetch');
+                                }
                             });
                         } catch (ignoreClone) {
-                            rememberManifestUrl(url, 'fetch');
+                            if (isManifestUrl(url)) {
+                                rememberManifestUrl(url, 'fetch');
+                            }
                         }
                         return response;
                     });
                 } catch (ignoreThen) {
-                    rememberManifestUrl(url, 'fetch');
+                    if (isManifestUrl(url)) {
+                        rememberManifestUrl(url, 'fetch');
+                    }
                 }
             }
             return result;
@@ -32714,7 +32777,7 @@ class OipfVideoBroadcastMapper {
         window.XMLHttpRequest.prototype.send = function () {
             var xhr = this;
             var url = xhr.__openhbbtvManifestUrl || '';
-            if (isManifestUrl(url)) {
+            if (isManifestUrl(url) || shouldScanMediaResponse(url)) {
                 try {
                     xhr.addEventListener('load', function () {
                         var text = '';
@@ -32724,13 +32787,22 @@ class OipfVideoBroadcastMapper {
                             }
                         } catch (ignoreText) {
                         }
-                        rememberManifestUrl(url, 'xhr', text);
+                        if (isManifestUrl(url)) {
+                            rememberManifestUrl(url, 'xhr', text);
+                        }
+                        if (shouldScanMediaResponse(url)) {
+                            rememberMediaUrlsFromText(text, 'xhr', url);
+                        }
                     }, false);
                     xhr.addEventListener('error', function () {
-                        rememberManifestUrl(url, 'xhr-error');
+                        if (isManifestUrl(url)) {
+                            rememberManifestUrl(url, 'xhr-error');
+                        }
                     }, false);
                 } catch (ignoreListener) {
-                    rememberManifestUrl(url, 'xhr-open');
+                    if (isManifestUrl(url)) {
+                        rememberManifestUrl(url, 'xhr-open');
+                    }
                 }
             }
             return nativeSend.apply(this, arguments);
@@ -32920,6 +32992,14 @@ class OipfVideoBroadcastMapper {
     }
 
     function installMutationObserver() {
+        if (zdfDisableHtml5VodMutationObserver()) {
+            if (!ns.html5VodMutationObserverDisabledForZdf) {
+                ns.html5VodMutationObserverDisabledForZdf = true;
+                ns.html5VodMutationObserverInstalled = true;
+                log('mutation observer disabled on ZDF');
+            }
+            return;
+        }
         if (!window.MutationObserver || ns.html5VodMutationObserverInstalled) {
             return;
         }

@@ -593,7 +593,8 @@ void WebView::injectHbbTVScripts(const QString &src)
         const bool zdfBootTrace = openHbbTVEnvEnabled("OPENHBBTV_ZDF_BOOT_TRACE", false);
         const bool zdfSilentBroadcastObject = openHbbTVEnvEnabled("OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT", true);
         const bool zdfSkipBroadcastAudioComponents = openHbbTVEnvEnabled("OPENHBBTV_ZDF_SKIP_BROADCAST_AUDIO_COMPONENTS", true);
-        const bool zdfDisableHtml5VodBridge = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DISABLE_HTML5VOD_BRIDGE", true);
+        const bool zdfDisableHtml5VodBridge = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DISABLE_HTML5VOD_BRIDGE", false);
+        const bool zdfDisableHtml5VodMutationObserver = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DISABLE_HTML5VOD_MUTATION_OBSERVER", true);
         source.prepend(QStringLiteral("window.OPENHBBTV_JS_ERROR_BRIDGE=%1;\n")
             .arg(jsErrorBridge ? QStringLiteral("true") : QStringLiteral("false")));
         source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_BOOT_TRACE=%1;\n")
@@ -604,6 +605,8 @@ void WebView::injectHbbTVScripts(const QString &src)
             .arg(zdfSkipBroadcastAudioComponents ? QStringLiteral("true") : QStringLiteral("false")));
         source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_DISABLE_HTML5VOD_BRIDGE=%1;\n")
             .arg(zdfDisableHtml5VodBridge ? QStringLiteral("true") : QStringLiteral("false")));
+        source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_DISABLE_HTML5VOD_MUTATION_OBSERVER=%1;\n")
+            .arg(zdfDisableHtml5VodMutationObserver ? QStringLiteral("true") : QStringLiteral("false")));
 
         QWebEngineScript script;
         script.setName("hbbtv_polyfill");
@@ -634,7 +637,8 @@ void WebView::injectHbbTVScripts(const QString &src)
                  << "polyfill zdf boot trace" << zdfBootTrace
                  << "zdf silent broadcast object" << zdfSilentBroadcastObject
                  << "zdf skip broadcast audio components" << zdfSkipBroadcastAudioComponents
-                 << "zdf disable html5 vod bridge" << zdfDisableHtml5VodBridge;
+                 << "zdf disable html5 vod bridge" << zdfDisableHtml5VodBridge
+                 << "zdf disable html5 vod mutation observer" << zdfDisableHtml5VodMutationObserver;
     } else {
         qWarning() << "[HbbTV] Polyfill not found:" << src;
     }
@@ -662,7 +666,8 @@ void WebView::injectXmlHttpRequestScripts()
         const bool zdfDirectInitRequest = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DIRECT_INIT_REQUEST", false);
         const bool zdfSilentBroadcastObject = openHbbTVEnvEnabled("OPENHBBTV_ZDF_SILENT_BROADCAST_OBJECT", true);
         const bool zdfSkipBroadcastAudioComponents = openHbbTVEnvEnabled("OPENHBBTV_ZDF_SKIP_BROADCAST_AUDIO_COMPONENTS", true);
-        const bool zdfDisableHtml5VodBridge = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DISABLE_HTML5VOD_BRIDGE", true);
+        const bool zdfDisableHtml5VodBridge = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DISABLE_HTML5VOD_BRIDGE", false);
+        const bool zdfDisableHtml5VodMutationObserver = openHbbTVEnvEnabled("OPENHBBTV_ZDF_DISABLE_HTML5VOD_MUTATION_OBSERVER", true);
         source.prepend(QStringLiteral("window.OPENHBBTV_AUTH_HTTP_DEBUG=%1;\n"
                                       "window.OPENHBBTV_HBBTV_HTTP_DEBUG=%2;\n"
                                       "window.OPENHBBTV_HBBTV_HTTP_BODY_DEBUG=%3;\n"
@@ -697,6 +702,8 @@ void WebView::injectXmlHttpRequestScripts()
                            .arg(zdfSkipBroadcastAudioComponents ? QStringLiteral("true") : QStringLiteral("false")));
         source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_DISABLE_HTML5VOD_BRIDGE=%1;\n")
                            .arg(zdfDisableHtml5VodBridge ? QStringLiteral("true") : QStringLiteral("false")));
+        source.prepend(QStringLiteral("window.OPENHBBTV_ZDF_DISABLE_HTML5VOD_MUTATION_OBSERVER=%1;\n")
+                           .arg(zdfDisableHtml5VodMutationObserver ? QStringLiteral("true") : QStringLiteral("false")));
 
         QWebEngineScript script;
         script.setName("xmlhttprequest_quirks");
@@ -721,7 +728,8 @@ void WebView::injectXmlHttpRequestScripts()
                  << "zdf stable object entries" << zdfStableObjectEntries
                  << "zdf silent broadcast object" << zdfSilentBroadcastObject
                  << "zdf skip broadcast audio components" << zdfSkipBroadcastAudioComponents
-                 << "zdf disable html5 vod bridge" << zdfDisableHtml5VodBridge;
+                 << "zdf disable html5 vod bridge" << zdfDisableHtml5VodBridge
+                 << "zdf disable html5 vod mutation observer" << zdfDisableHtml5VodMutationObserver;
     } else {
         qWarning() << "[HbbTV] xmlhttprequest_quirks.js not found in qrc";
     }
